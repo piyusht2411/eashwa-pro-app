@@ -1,0 +1,43 @@
+/** @type {import('tailwindcss').Config} */
+module.exports = {
+  content: ["./app/**/*.{js,jsx,ts,tsx}", "./components/**/*.{js,jsx,ts,tsx}"],
+  presets: [require("nativewind/preset")],
+  theme: {
+    extend: {
+      colors: {
+        background: "hsl(0, 0%, 100%)",
+        foreground: "hsl(0, 0%, 10%)",
+        card: "hsl(0, 0%, 100%)",
+        "card-foreground": "hsl(0, 0%, 10%)",
+        primary: "hsl(25, 95%, 50%)",
+        "primary-foreground": "hsl(0, 0%, 100%)",
+        "primary-dark": "hsl(25, 95%, 40%)",
+        "primary-light": "hsl(25, 100%, 95%)",
+        secondary: "hsl(0, 0%, 96%)",
+        "secondary-foreground": "hsl(0, 0%, 20%)",
+        muted: "hsl(0, 0%, 94%)",
+        "muted-foreground": "hsl(0, 0%, 48%)",
+        accent: "hsl(25, 100%, 96%)",
+        "accent-foreground": "hsl(25, 95%, 45%)",
+        border: "hsl(0, 0%, 88%)",
+        input: "hsl(0, 0%, 92%)",
+        ring: "hsl(25, 95%, 50%)",
+        success: "hsl(142, 60%, 42%)",
+        "success-light": "hsl(142, 60%, 95%)",
+        warning: "hsl(38, 92%, 50%)",
+        "warning-light": "hsl(38, 92%, 95%)",
+        destructive: "hsl(0, 85%, 50%)",
+        "destructive-light": "hsl(0, 85%, 95%)",
+        "surface-soft": "hsl(25, 50%, 98%)",
+      },
+      borderRadius: {
+        "2xl": "1rem",
+        xl: "0.75rem",
+        lg: "0.625rem",
+        md: "0.5rem",
+        sm: "0.375rem",
+      },
+    },
+  },
+  plugins: [],
+};

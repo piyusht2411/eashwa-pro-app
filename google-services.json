@@ -1,0 +1,29 @@
+{
+  "project_info": {
+    "project_number": "178833593996",
+    "project_id": "eashwa-pro",
+    "storage_bucket": "eashwa-pro.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:178833593996:android:fdc8194618317cd21b0da9",
+        "android_client_info": {
+          "package_name": "com.piyusht2411.eashwapro"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyDYeNmwzN6N39CFVXSPZMDLcdNErjnxMN8"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}

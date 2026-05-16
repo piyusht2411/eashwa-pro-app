@@ -1,0 +1,328 @@
+import { useAuthStore } from "@/stores/authStore";
+import { isNearScrollBottom } from "@/lib/scrollPagination";
+import { Container, PDIVerification, ProductionLog, Team, useProductionStore } from "@/stores/productionStore";
+import { Package, Plus, X } from "lucide-react-native";
+import { useEffect, useState } from "react";
+import {
+  ActivityIndicator,
+  Alert,
+  KeyboardAvoidingView,
+  Modal,
+  Platform,
+  Pressable,
+  RefreshControl,
+  ScrollView,
+  StyleSheet,
+  Text,
+  TextInput,
+  View,
+} from "react-native";
+import { SafeAreaView, useSafeAreaInsets } from "react-native-safe-area-context";
+
+const getTeamName = (container: Container) =>
+  typeof container.assignedTeam === "string" ? "Team" : container.assignedTeam.name;
+
+const getContainerId = (value: string | { _id: string }) =>
+  typeof value === "string" ? value : value._id;
+
+const getVerifiedForContainer = (verifications: PDIVerification[], containerId: string) =>
+  verifications
+    .filter((v) => getContainerId(v.container) === containerId)
+    .reduce((sum, v) => sum + (v.verifiedQuantity || 0), 0);
+
+const getReportedForContainer = (logs: ProductionLog[], containerId: string) =>
+  logs
+    .filter((log) => getContainerId(log.container) === containerId)
+    .reduce((sum, log) => sum + log.reportedQuantity, 0);
+
+const formatDateTime = (value: string) => {
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return value;
+
+  return date.toLocaleString("en-IN", {
+    day: "2-digit",
+    month: "short",
+    year: "numeric",
+    hour: "numeric",
+    minute: "2-digit",
+    hour12: true,
+  });
+};
+
+export default function AdminContainers() {
+  const insets = useSafeAreaInsets();
+  const { containers, containersPagination, pdiVerifications, productionLogs, teams, fetchContainers, fetchTeams, createContainer } =
+    useProductionStore();
+  const { token } = useAuthStore();
+  const productionTeams = teams.filter((team) => team.role === "team");
+  const firstTeam = productionTeams[0];
+  const [showModal, setShowModal] = useState(false);
+  const [form, setForm] = useState({
+    model: "",
+    quantity: "",
+    ratePerUnit: "",
+    assignedTeamId: firstTeam?._id ?? "",
+    date: new Date().toISOString().split("T")[0],
+  });
+  const [refreshing, setRefreshing] = useState(false);
+  const [loadingMore, setLoadingMore] = useState(false);
+  const [submitting, setSubmitting] = useState(false);
+
+  useEffect(() => {
+    if (!token) return;
+
+    Promise.all([fetchContainers(token), fetchTeams(token)]).catch((error: any) => {
+      Alert.alert("Error", error.message || "Failed to load jobs");
+    });
+  }, [fetchContainers, fetchTeams, token]);
+
+  useEffect(() => {
+    if (form.assignedTeamId || !firstTeam?._id) return;
+
+    setForm((prev) => ({ ...prev, assignedTeamId: firstTeam._id }));
+  }, [firstTeam?._id, form.assignedTeamId]);
+
+  const handleRefresh = async () => {
+    if (!token) return;
+    setRefreshing(true);
+    try {
+      await Promise.all([fetchContainers(token), fetchTeams(token)]);
+    } catch (error: any) {
+      Alert.alert("Error", error.message || "Failed to refresh jobs");
+    } finally {
+      setRefreshing(false);
+    }
+  };
+
+  const handleLoadMore = async () => {
+    if (!token || loadingMore || !containersPagination.hasNextPage) return;
+    setLoadingMore(true);
+    try {
+      await fetchContainers(token, containersPagination.page + 1);
+    } catch (error: any) {
+      Alert.alert("Error", error.message || "Failed to load more jobs");
+    } finally {
+      setLoadingMore(false);
+    }
+  };
+
+  const handleCreate = async () => {
+    if (submitting) return;
+    if (!form.model || !form.quantity || !form.ratePerUnit || !form.assignedTeamId) {
+      Alert.alert("Error", "Fill all fields and select a team");
+      return;
+    }
+    if (!token) {
+      Alert.alert("Error", "Not authenticated");
+      return;
+    }
+
+    try {
+      setSubmitting(true);
+      await createContainer(
+        form.model,
+        Number(form.quantity),
+        form.date,
+        Number(form.ratePerUnit),
+        form.assignedTeamId,
+        token,
+      );
+      setShowModal(false);
+      setForm({
+        model: "",
+        quantity: "",
+        ratePerUnit: "",
+        assignedTeamId: firstTeam?._id ?? "",
+        date: new Date().toISOString().split("T")[0],
+      });
+      Alert.alert("Success", "Job assigned successfully!");
+    } catch (error: any) {
+      Alert.alert("Error", error.message || "Failed to assign job");
+    } finally {
+      setSubmitting(false);
+    }
+  };
+
+  const statusColors: Record<string, string> = { active: "#059669", completed: "#F97316", cancelled: "#DC2626" };
+  const statusBg: Record<string, string> = { active: "#F0FDF4", completed: "#FFF7ED", cancelled: "#FEF2F2" };
+
+  return (
+    <SafeAreaView style={s.safe}>
+      <View style={s.header}>
+        <Text style={s.title}>Jobs / Containers</Text>
+        <Pressable onPress={() => setShowModal(true)} style={s.addBtn}>
+          <Plus color="#fff" size={18} />
+          <Text style={s.addBtnText}>Assign Job</Text>
+        </Pressable>
+      </View>
+
+      <ScrollView
+        showsVerticalScrollIndicator={false}
+        onScroll={({ nativeEvent }) => {
+          if (isNearScrollBottom(nativeEvent)) handleLoadMore();
+        }}
+        scrollEventThrottle={400}
+        refreshControl={
+          <RefreshControl refreshing={refreshing} onRefresh={handleRefresh} tintColor="#F97316" />
+        }
+      >
+        {containers.map((container) => {
+          const verified = getVerifiedForContainer(pdiVerifications, container._id);
+          const reported = getReportedForContainer(productionLogs, container._id);
+          const progress =
+            container.quantity > 0 ? Math.min((verified / container.quantity) * 100, 100) : 0;
+          const statusColor = statusColors[container.status] ?? "#64748B";
+          return (
+            <View key={container._id} style={s.card}>
+              <View style={s.cardTop}>
+                <View style={s.cardIcon}>
+                  <Package color="#F97316" size={20} />
+                </View>
+                <View style={s.cardInfo}>
+                  <Text style={s.cardModel}>{container.model}</Text>
+                  <Text style={s.cardMeta}>
+                    {getTeamName(container)} - {formatDateTime(container.date)}
+                  </Text>
+                </View>
+                <View style={[s.badge, { backgroundColor: statusBg[container.status] ?? "#F1F5F9" }]}>
+                  <Text style={[s.badgeText, { color: statusColor }]}>
+                    {container.status.toUpperCase()}
+                  </Text>
+                </View>
+              </View>
+              <View style={s.progressBg}>
+                <View style={[s.progressFill, { width: `${progress}%` as any, backgroundColor: statusColor }]} />
+              </View>
+              <Text style={s.progressLabel}>
+                {verified} / {container.quantity} verified - {progress.toFixed(0)}%
+              </Text>
+              <View style={s.statsRow}>
+                <View style={s.stat}><Text style={s.statLbl}>Target</Text><Text style={s.statVal}>{container.quantity}</Text></View>
+                <View style={s.stat}><Text style={s.statLbl}>Reported</Text><Text style={[s.statVal, { color: "#D97706" }]}>{reported}</Text></View>
+                <View style={s.stat}><Text style={s.statLbl}>Verified</Text><Text style={[s.statVal, { color: "#059669" }]}>{verified}</Text></View>
+                <View style={s.stat}><Text style={s.statLbl}>Rate</Text><Text style={[s.statVal, { color: "#F97316" }]}>Rs {container.ratePerUnit}</Text></View>
+              </View>
+            </View>
+          );
+        })}
+        {loadingMore && <ActivityIndicator color="#F97316" style={{ marginVertical: 16 }} />}
+        <View style={{ height: 20 }} />
+      </ScrollView>
+
+      <Modal visible={showModal} transparent animationType="slide">
+        <View style={s.overlay}>
+          <KeyboardAvoidingView
+            behavior={Platform.OS === "ios" ? "padding" : "height"}
+            style={s.keyboardAvoid}
+          >
+            <View style={s.modal}>
+              <ScrollView
+                keyboardShouldPersistTaps="handled"
+                showsVerticalScrollIndicator={false}
+                contentContainerStyle={{ paddingBottom: Math.max(insets.bottom, 24) }}
+              >
+                <View style={s.modalHeader}>
+                  <Text style={s.modalTitle}>Assign New Job</Text>
+                  <Pressable onPress={() => setShowModal(false)}>
+                    <X color="#94A3B8" size={22} />
+                  </Pressable>
+                </View>
+                {[
+                  { label: "Scooter Model", key: "model", placeholder: "e.g. Ola S1 Pro" },
+                  { label: "Target Quantity", key: "quantity", placeholder: "e.g. 100", keyboard: "numeric" as const },
+                  { label: "Rate per Unit (Rs)", key: "ratePerUnit", placeholder: "e.g. 250", keyboard: "numeric" as const },
+                  { label: "Date", key: "date", placeholder: "YYYY-MM-DD" },
+                ].map((field) => (
+                  <View key={field.key} style={s.fieldWrap}>
+                    <Text style={s.fieldLabel}>{field.label}</Text>
+                    <TextInput
+                      style={s.fieldInput}
+                      value={form[field.key as keyof typeof form]}
+                      onChangeText={(value) => setForm((prev) => ({ ...prev, [field.key]: value }))}
+                      placeholder={field.placeholder}
+                      placeholderTextColor="#CBD5E1"
+                      keyboardType={field.keyboard ?? "default"}
+                      editable={!submitting}
+                    />
+                  </View>
+                ))}
+                <View style={s.fieldWrap}>
+                  <Text style={s.fieldLabel}>Assign Production Team</Text>
+                  {productionTeams.length === 0 ? (
+                    <Text style={s.noTeamText}>No production teams yet. Create one in the Teams tab.</Text>
+                  ) : (
+                    <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{ gap: 8 }}>
+                      {productionTeams.map((team: Team) => (
+                        <Pressable
+                          key={team._id}
+                          onPress={() => setForm((prev) => ({ ...prev, assignedTeamId: team._id }))}
+                          disabled={submitting}
+                          style={[s.teamChip, form.assignedTeamId === team._id && s.teamChipActive]}
+                        >
+                          <Text style={[s.teamChipText, form.assignedTeamId === team._id && { color: "#F97316" }]}>
+                            {team.name}
+                          </Text>
+                          <Text style={s.teamChipCount}>{team.email}</Text>
+                        </Pressable>
+                      ))}
+                    </ScrollView>
+                  )}
+                </View>
+                <Pressable
+                  onPress={handleCreate}
+                  disabled={submitting}
+                  style={[s.createBtn, submitting && s.createBtnDisabled]}
+                >
+                  {submitting ? (
+                    <ActivityIndicator color="#fff" />
+                  ) : (
+                    <Text style={s.createBtnText}>Assign Job</Text>
+                  )}
+                </Pressable>
+              </ScrollView>
+            </View>
+          </KeyboardAvoidingView>
+        </View>
+      </Modal>
+    </SafeAreaView>
+  );
+}
+
+const s = StyleSheet.create({
+  safe: { flex: 1, backgroundColor: "#F8FAFC" },
+  header: { flexDirection: "row", justifyContent: "space-between", alignItems: "center", paddingHorizontal: 20, paddingTop: 20, paddingBottom: 16 },
+  title: { fontSize: 20, fontWeight: "800", color: "#0F172A" },
+  addBtn: { flexDirection: "row", alignItems: "center", gap: 6, backgroundColor: "#F97316", borderRadius: 12, paddingHorizontal: 14, paddingVertical: 9 },
+  addBtnText: { color: "#fff", fontWeight: "700", fontSize: 13 },
+  card: { marginHorizontal: 20, marginBottom: 12, backgroundColor: "#FFFFFF", borderRadius: 16, borderWidth: 1, borderColor: "#E2E8F0", padding: 16 },
+  cardTop: { flexDirection: "row", alignItems: "center", marginBottom: 12, gap: 12 },
+  cardIcon: { width: 40, height: 40, backgroundColor: "#FFF7ED", borderRadius: 12, alignItems: "center", justifyContent: "center" },
+  cardInfo: { flex: 1 },
+  cardModel: { fontSize: 15, fontWeight: "700", color: "#0F172A" },
+  cardMeta: { fontSize: 12, color: "#64748B", marginTop: 2 },
+  badge: { borderRadius: 8, paddingHorizontal: 8, paddingVertical: 4 },
+  badgeText: { fontSize: 10, fontWeight: "700" },
+  progressBg: { height: 5, backgroundColor: "#F1F5F9", borderRadius: 10, marginBottom: 6, overflow: "hidden" },
+  progressFill: { height: "100%", borderRadius: 10 },
+  progressLabel: { fontSize: 11, color: "#94A3B8", marginBottom: 12 },
+  statsRow: { flexDirection: "row", justifyContent: "space-between" },
+  stat: { alignItems: "center" },
+  statLbl: { fontSize: 10, color: "#94A3B8", marginBottom: 2 },
+  statVal: { fontSize: 14, fontWeight: "700", color: "#0F172A" },
+  overlay: { flex: 1, backgroundColor: "#00000080", justifyContent: "flex-end" },
+  keyboardAvoid: { width: "100%" },
+  modal: { backgroundColor: "#FFFFFF", borderTopLeftRadius: 28, borderTopRightRadius: 28, padding: 24, borderTopWidth: 1, borderColor: "#E2E8F0", maxHeight: "90%" },
+  modalHeader: { flexDirection: "row", justifyContent: "space-between", alignItems: "center", marginBottom: 20 },
+  modalTitle: { fontSize: 20, fontWeight: "800", color: "#0F172A" },
+  fieldWrap: { marginBottom: 14 },
+  fieldLabel: { fontSize: 12, fontWeight: "600", color: "#475569", marginBottom: 6 },
+  fieldInput: { backgroundColor: "#F8FAFC", borderWidth: 1.5, borderColor: "#E2E8F0", borderRadius: 12, paddingHorizontal: 14, paddingVertical: 12, color: "#0F172A", fontSize: 14 },
+  noTeamText: { fontSize: 13, color: "#94A3B8", fontStyle: "italic" },
+  teamChip: { padding: 12, borderRadius: 12, backgroundColor: "#F8FAFC", borderWidth: 1.5, borderColor: "#E2E8F0", minWidth: 120 },
+  teamChipActive: { backgroundColor: "#FFF7ED", borderColor: "#FED7AA" },
+  teamChipText: { fontSize: 13, fontWeight: "700", color: "#0F172A", marginBottom: 2 },
+  teamChipCount: { fontSize: 11, color: "#94A3B8" },
+  createBtn: { backgroundColor: "#F97316", borderRadius: 14, paddingVertical: 15, alignItems: "center", marginTop: 8 },
+  createBtnDisabled: { opacity: 0.65 },
+  createBtnText: { color: "#fff", fontWeight: "700", fontSize: 16 },
+});

@@ -1,0 +1,143 @@
+// Centralized design tokens — orange/white theme with Inter font.
+// Import these instead of hardcoding hex/spacing/font values across screens.
+
+import { Platform, TextStyle } from "react-native";
+
+export const colors = {
+  // Brand
+  primary: "#F97316",
+  primaryDark: "#EA580C",
+  primaryDarker: "#C2410C",
+  primaryLight: "#FB923C",
+  primarySoft: "#FFEDD5",
+  primarySofter: "#FFF7ED",
+  primaryBorder: "#FED7AA",
+
+  // Surfaces
+  bg: "#FFFFFF",
+  bgMuted: "#FAFAFA",
+  bgSubtle: "#F8FAFC",
+  surface: "#FFFFFF",
+  surfaceAlt: "#F1F5F9",
+
+  // Text
+  text: "#0F172A",
+  textSecondary: "#475569",
+  textMuted: "#64748B",
+  textFaint: "#94A3B8",
+  textOnPrimary: "#FFFFFF",
+
+  // Borders
+  border: "#E2E8F0",
+  borderStrong: "#CBD5E1",
+  borderSoft: "#F1F5F9",
+
+  // Status
+  success: "#16A34A",
+  successSoft: "#F0FDF4",
+  successBorder: "#BBF7D0",
+  warning: "#D97706",
+  warningSoft: "#FFFBEB",
+  warningBorder: "#FDE68A",
+  danger: "#DC2626",
+  dangerSoft: "#FEF2F2",
+  dangerBorder: "#FECACA",
+  info: "#2563EB",
+  infoSoft: "#EFF6FF",
+  infoBorder: "#BFDBFE",
+
+  // Overlay
+  overlay: "rgba(15, 23, 42, 0.45)",
+
+  white: "#FFFFFF",
+  black: "#0F172A",
+};
+
+export const spacing = {
+  xs: 4,
+  sm: 8,
+  md: 12,
+  lg: 16,
+  xl: 20,
+  "2xl": 24,
+  "3xl": 32,
+  "4xl": 40,
+  "5xl": 56,
+};
+
+export const radius = {
+  sm: 8,
+  md: 12,
+  lg: 16,
+  xl: 20,
+  "2xl": 24,
+  full: 999,
+};
+
+export const fonts = {
+  regular: "Inter_400Regular",
+  medium: "Inter_500Medium",
+  semibold: "Inter_600SemiBold",
+  bold: "Inter_700Bold",
+  extrabold: "Inter_800ExtraBold",
+};
+
+type T = TextStyle;
+
+export const typography: Record<string, T> = {
+  displayLg: { fontFamily: fonts.extrabold, fontSize: 32, lineHeight: 38, letterSpacing: -0.5, color: colors.text },
+  display: { fontFamily: fonts.extrabold, fontSize: 26, lineHeight: 32, letterSpacing: -0.3, color: colors.text },
+  h1: { fontFamily: fonts.bold, fontSize: 22, lineHeight: 28, letterSpacing: -0.2, color: colors.text },
+  h2: { fontFamily: fonts.bold, fontSize: 18, lineHeight: 24, color: colors.text },
+  h3: { fontFamily: fonts.semibold, fontSize: 16, lineHeight: 22, color: colors.text },
+  body: { fontFamily: fonts.regular, fontSize: 14, lineHeight: 20, color: colors.text },
+  bodyMd: { fontFamily: fonts.medium, fontSize: 14, lineHeight: 20, color: colors.text },
+  bodySm: { fontFamily: fonts.regular, fontSize: 13, lineHeight: 18, color: colors.textSecondary },
+  caption: { fontFamily: fonts.medium, fontSize: 12, lineHeight: 16, color: colors.textMuted },
+  overline: {
+    fontFamily: fonts.bold,
+    fontSize: 11,
+    lineHeight: 14,
+    letterSpacing: 1.4,
+    textTransform: "uppercase",
+    color: colors.textFaint,
+  },
+  label: { fontFamily: fonts.semibold, fontSize: 12, lineHeight: 16, color: colors.textSecondary },
+  button: { fontFamily: fonts.bold, fontSize: 15, lineHeight: 20, letterSpacing: 0.2, color: colors.white },
+};
+
+export const shadow = {
+  sm: Platform.select({
+    ios: {
+      shadowColor: "#0F172A",
+      shadowOpacity: 0.06,
+      shadowRadius: 8,
+      shadowOffset: { width: 0, height: 2 },
+    },
+    android: { elevation: 1 },
+    default: {},
+  }) as object,
+  md: Platform.select({
+    ios: {
+      shadowColor: "#0F172A",
+      shadowOpacity: 0.08,
+      shadowRadius: 16,
+      shadowOffset: { width: 0, height: 4 },
+    },
+    android: { elevation: 3 },
+    default: {},
+  }) as object,
+  lg: Platform.select({
+    ios: {
+      shadowColor: "#F97316",
+      shadowOpacity: 0.18,
+      shadowRadius: 24,
+      shadowOffset: { width: 0, height: 8 },
+    },
+    android: { elevation: 6 },
+    default: {},
+  }) as object,
+};
+
+export const theme = { colors, spacing, radius, fonts, typography, shadow };
+export default theme;
