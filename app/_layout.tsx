@@ -96,6 +96,7 @@ export default function RootLayout() {
           <Stack.Screen name="(team)" />
           <Stack.Screen name="(pdi)" />
           <Stack.Screen name="notification-detail" />
+          <Stack.Screen name="notifications" />
         </Stack>
       </SafeAreaProvider>
     </GestureHandlerRootView>

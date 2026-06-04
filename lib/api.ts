@@ -212,22 +212,27 @@ export interface ContainerResponse {
   quantity: number;
   date: string;
   ratePerUnit: number;
+  penaltyPerUnit: number;
+  // Server-computed live penalty figures
+  verifiedQuantity?: number;
+  pendingQuantity?: number;
+  totalPenalty?: number;
   assignedTeam:
-    | {
-        _id: string;
-        name: string;
-        email: string;
-        phone?: string;
-      }
-    | string;
+  | {
+    _id: string;
+    name: string;
+    email: string;
+    phone?: string;
+  }
+  | string;
   status: "active" | "completed" | "cancelled";
   createdBy:
-    | {
-        _id: string;
-        name: string;
-        email: string;
-      }
-    | string;
+  | {
+    _id: string;
+    name: string;
+    email: string;
+  }
+  | string;
   createdAt: string;
   updatedAt: string;
 }
@@ -238,6 +243,7 @@ export async function createContainer(
     quantity: number;
     date: string;
     ratePerUnit: number;
+    penaltyPerUnit?: number;
     assignedTeam: string;
   },
   authToken: string,
@@ -246,6 +252,28 @@ export async function createContainer(
     "/containers",
     {
       method: "POST",
+      body: JSON.stringify(data),
+    },
+    authToken,
+  );
+}
+
+export async function updateContainer(
+  id: string,
+  data: Partial<{
+    model: string;
+    quantity: number;
+    date: string;
+    ratePerUnit: number;
+    penaltyPerUnit: number;
+    status: string;
+  }>,
+  authToken: string,
+): Promise<{ message: string; container: ContainerResponse }> {
+  return apiFetch<{ message: string; container: ContainerResponse }>(
+    `/containers/${id}`,
+    {
+      method: "PATCH",
       body: JSON.stringify(data),
     },
     authToken,
@@ -294,15 +322,15 @@ export async function updateContainerStatus(
 export interface ProductionLogResponse {
   _id: string;
   container:
-    | string
-    | {
-        _id: string;
-        model: string;
-        quantity: number;
-        date: string;
-        ratePerUnit: number;
-        status: string;
-      };
+  | string
+  | {
+    _id: string;
+    model: string;
+    quantity: number;
+    date: string;
+    ratePerUnit: number;
+    status: string;
+  };
   team: string | { _id: string; name: string; email: string };
   date: string;
   reportedQuantity: number;
@@ -383,8 +411,8 @@ export async function getProductionLogById(
 export interface PDIVerificationResponse {
   _id: string;
   productionLog:
-    | string
-    | { _id: string; date: string; reportedQuantity: number };
+  | string
+  | { _id: string; date: string; reportedQuantity: number };
   container: string | { _id: string; model: string };
   verifiedBy?: {
     _id: string;
@@ -403,8 +431,24 @@ export interface PDIVerificationResponse {
 export async function getPDIDashboard(
   authToken: string,
   params: PaginationParams = {},
-): Promise<{ pendingCount: number; recentVerifications: any[] } & PaginatedResponse> {
+): Promise<{
+  pendingCount: number;
+  totalPenalty: number;
+  totalPendingVehicles: number;
+  recentVerifications: any[];
+} & PaginatedResponse> {
   return apiFetch<any>(withPagination("/pdi/dashboard", params), {}, authToken);
+}
+
+export async function unverifyProductionLog(
+  logId: string,
+  authToken: string,
+): Promise<{ message: string; logId: string }> {
+  return apiFetch<{ message: string; logId: string }>(
+    `/pdi/log/${logId}`,
+    { method: "DELETE" },
+    authToken,
+  );
 }
 
 export async function verifyProductionLog(
@@ -528,6 +572,228 @@ export async function recordPayment(
       method: "POST",
       body: JSON.stringify(data),
     },
+    authToken,
+  );
+}
+
+// ─── Admin Insights API ─────────────────────────────────────────────────────
+
+export interface AdminDashboardSummary {
+  totalProduction: number;
+  pendingVerify: number;
+  totalAmount: number;
+  paidAmount: number;
+  remainingAmount: number;
+  totalPenalty: number;
+  totalPendingVehicles: number;
+}
+
+export async function getAdminDashboardSummary(
+  authToken: string,
+): Promise<AdminDashboardSummary> {
+  return apiFetch<AdminDashboardSummary>(
+    "/admin/dashboard-summary",
+    {},
+    authToken,
+  );
+}
+
+export type AdminActivityType =
+  | "production_log"
+  | "pdi_verification"
+  | "payment";
+
+export interface AdminMonitorResponse {
+  activeContainers: number;
+  totalTeams: number;
+  totalPdiUsers: number;
+  todayLogs: number;
+  todayVerified: number;
+  todayPending: number;
+  recentActivity: Array<{
+    type: AdminActivityType;
+    description: string;
+    timestamp: string;
+  }>;
+}
+
+export async function getAdminMonitor(
+  authToken: string,
+): Promise<AdminMonitorResponse> {
+  return apiFetch<AdminMonitorResponse>("/admin/monitor", {}, authToken);
+}
+
+export interface AdminReportLog {
+  _id: string;
+  date: string;
+  container: { _id: string; model: string; ratePerUnit: number };
+  team: { _id: string; name: string };
+  reportedQuantity: number;
+  verifiedQuantity: number | null;
+  status: "pending" | "verified" | "incomplete";
+  missingQuantity?: number;
+  remarks?: string;
+}
+
+export interface AdminReportResponse {
+  summary: {
+    totalReported: number;
+    totalVerified: number;
+    totalIncomplete: number;
+    totalAmount: number;
+    totalPaid: number;
+    totalRemaining: number;
+  };
+  logs: AdminReportLog[];
+  pagination: PaginationMeta;
+}
+
+export interface AdminReportExportResponse {
+  logs: AdminReportLog[];
+  total: number;
+  filters: {
+    startDate: string | null;
+    endDate: string | null;
+    teamId: string | null;
+  };
+}
+
+export async function getAdminReport(
+  authToken: string,
+  params: {
+    startDate?: string;
+    endDate?: string;
+    teamId?: string;
+    page?: number;
+    limit?: number;
+  },
+): Promise<AdminReportResponse> {
+  const query = new URLSearchParams();
+  if (params.startDate) query.set("startDate", params.startDate);
+  if (params.endDate) query.set("endDate", params.endDate);
+  if (params.teamId) query.set("teamId", params.teamId);
+  if (params.page) query.set("page", String(params.page));
+  if (params.limit) query.set("limit", String(params.limit));
+  const qs = query.toString();
+  return apiFetch<AdminReportResponse>(
+    `/admin/report${qs ? `?${qs}` : ""}`,
+    {},
+    authToken,
+  );
+}
+
+// ─── Notifications API ──────────────────────────────────────────────────────
+
+export async function getAdminReportExport(
+  authToken: string,
+  params: {
+    startDate?: string;
+    endDate?: string;
+    teamId?: string;
+  },
+): Promise<AdminReportExportResponse> {
+  const query = new URLSearchParams();
+  if (params.startDate) query.set("startDate", params.startDate);
+  if (params.endDate) query.set("endDate", params.endDate);
+  if (params.teamId) query.set("teamId", params.teamId);
+  const qs = query.toString();
+  return apiFetch<AdminReportExportResponse>(
+    `/admin/report/export${qs ? `?${qs}` : ""}`,
+    {},
+    authToken,
+  );
+}
+
+export interface NotificationItem {
+  _id: string;
+  type: string;
+  title: string;
+  body: string;
+  data: Record<string, string>;
+  isRead: boolean;
+  createdAt: string;
+}
+
+export interface NotificationsResponse {
+  notifications: NotificationItem[];
+  pagination: PaginationMeta;
+}
+
+export async function getNotifications(
+  authToken: string,
+  page = 1,
+): Promise<NotificationsResponse> {
+  return apiFetch<NotificationsResponse>(
+    `/notifications?page=${page}`,
+    {},
+    authToken,
+  );
+}
+
+export async function markAllNotificationsRead(
+  authToken: string,
+): Promise<{ message: string }> {
+  return apiFetch<{ message: string }>(
+    "/notifications/read-all",
+    { method: "POST" },
+    authToken,
+  );
+}
+
+// ─── Team History API ───────────────────────────────────────────────────────
+
+export interface TeamHistoryLog {
+  _id: string;
+  date: string;
+  container: {
+    _id: string;
+    model: string;
+    ratePerUnit: number;
+    quantity: number;
+  };
+  reportedQuantity: number;
+  verifiedQuantity: number | null;
+  status: "pending" | "verified" | "incomplete";
+  remainingTarget: number;
+  pdiVerification?: {
+    verifiedQuantity: number;
+    isIncomplete: boolean;
+    missingQuantity: number;
+    remarks: string;
+  };
+}
+
+export interface TeamHistoryResponse {
+  logs: TeamHistoryLog[];
+  pagination: PaginationMeta;
+}
+
+export async function getTeamHistory(
+  authToken: string,
+  params: { month?: string; date?: string; page?: number },
+): Promise<TeamHistoryResponse> {
+  const query = new URLSearchParams();
+  if (params.month) query.set("month", params.month);
+  if (params.date) query.set("date", params.date);
+  if (params.page) query.set("page", String(params.page));
+  const qs = query.toString();
+  return apiFetch<TeamHistoryResponse>(
+    `/production-logs/history${qs ? `?${qs}` : ""}`,
+    {},
+    authToken,
+  );
+}
+
+// ─── PDI: edit incomplete verification ──────────────────────────────────────
+
+export async function editIncompleteVerification(
+  verificationId: string,
+  payload: { verifiedQuantity: number; remarks?: string },
+  authToken: string,
+): Promise<{ message: string; verification: PDIVerificationResponse }> {
+  return apiFetch<{ message: string; verification: PDIVerificationResponse }>(
+    `/pdi/verification/${verificationId}`,
+    { method: "PATCH", body: JSON.stringify(payload) },
     authToken,
   );
 }

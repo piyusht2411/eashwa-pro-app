@@ -1,17 +1,20 @@
 import { useAuthStore } from "@/stores/authStore";
 import { Card } from "@/components/ui/Card";
+import { AdminDashboardSummary, getAdminDashboardSummary } from "@/lib/api";
 import { isNearScrollBottom } from "@/lib/scrollPagination";
 import { colors, fonts, radius, shadow } from "@/lib/theme";
+import { formatDateOnly } from "@/lib/utils";
 import { Container, Payment, PDIVerification, useProductionStore } from "@/stores/productionStore";
 import { LinearGradient } from "expo-linear-gradient";
 import { router } from "expo-router";
 import {
   AlertCircle,
+  Bell,
+  ClipboardList,
   IndianRupee,
-  LogOut,
   Package,
   TrendingUp,
-  Users,
+  Wallet,
 } from "lucide-react-native";
 import {
   ActivityIndicator,
@@ -37,11 +40,14 @@ const getVerifiedForContainer = (verifications: PDIVerification[], containerId: 
     .filter((verification) => getContainerRefId(verification.container) === containerId)
     .reduce((sum, verification) => sum + (verification.verifiedQuantity || 0), 0);
 
+const formatINR = (n: number) =>
+  `₹${(n ?? 0).toLocaleString("en-IN", { maximumFractionDigits: 0 })}`;
+
 const findPaymentForContainer = (payments: Payment[], containerId: string) =>
   payments.find((payment) => getContainerRefId(payment.container) === containerId);
 
 export default function AdminDashboard() {
-  const { user, token, logout } = useAuthStore();
+  const { user, token } = useAuthStore();
   const {
     containers,
     containersPagination,
@@ -57,11 +63,31 @@ export default function AdminDashboard() {
   } = useProductionStore();
   const [refreshing, setRefreshing] = useState(false);
   const [loadingMore, setLoadingMore] = useState(false);
+  const [summary, setSummary] = useState<AdminDashboardSummary | null>(null);
+  const [summaryLoading, setSummaryLoading] = useState(true);
+
+  const loadSummary = useCallback(async () => {
+    if (!token) return;
+    setSummaryLoading(true);
+    try {
+      const data = await getAdminDashboardSummary(token);
+      setSummary(data);
+    } catch (e: any) {
+      Alert.alert("Error", e.message || "Failed to load summary");
+    } finally {
+      setSummaryLoading(false);
+    }
+  }, [token]);
 
   const loadDashboard = useCallback(async () => {
     if (!token) return;
-    await Promise.all([fetchContainers(token), fetchPayments(token), fetchTeams(token)]);
-  }, [fetchContainers, fetchPayments, fetchTeams, token]);
+    await Promise.all([
+      fetchContainers(token),
+      fetchPayments(token),
+      fetchTeams(token),
+      loadSummary(),
+    ]);
+  }, [fetchContainers, fetchPayments, fetchTeams, loadSummary, token]);
 
   useEffect(() => {
     loadDashboard().catch((error: any) => {
@@ -102,23 +128,20 @@ export default function AdminDashboard() {
     }
   };
 
-  const handleLogout = async () => {
-    await logout();
-    router.replace("/(auth)/login");
-  };
+  const goToNotifications = () => router.push("/(admin)/notifications" as any);
 
-  const activeJobs = containers.filter((c) => c.status === "active").length;
-  const totalVerified = pdiVerifications.reduce((sum, v) => sum + (v.verifiedQuantity || 0), 0);
-  const totalPaid = payments.reduce((sum, p) => sum + p.paidAmount, 0);
-  const totalDue = payments.reduce((sum, p) => sum + p.remainingAmount, 0);
-  const pendingVerif = productionLogs.filter((l) => l.status === "pending").length;
+  const pendingVerif = summary?.pendingVerify ?? productionLogs.filter((l) => l.status === "pending").length;
 
-  const stats = [
-    { label: "Active Containers", value: String(activeJobs), icon: Package, color: colors.primary, bg: colors.primarySofter, ring: colors.primaryBorder },
-    { label: "Verified Units", value: String(totalVerified), icon: TrendingUp, color: colors.success, bg: colors.successSoft, ring: colors.successBorder },
-    { label: "Total Paid", value: `₹${totalPaid.toLocaleString()}`, icon: IndianRupee, color: colors.warning, bg: colors.warningSoft, ring: colors.warningBorder },
-    { label: "Amount Due", value: `₹${totalDue.toLocaleString()}`, icon: Users, color: colors.danger, bg: colors.dangerSoft, ring: colors.dangerBorder },
-  ];
+  const stats: { label: string; value: string; icon: any; color: string; bg: string; ring: string }[] = summary
+    ? [
+        { label: "Total Production", value: String(summary.totalProduction), icon: TrendingUp, color: colors.primary, bg: colors.primarySofter, ring: colors.primaryBorder },
+        { label: "Pending Verify", value: String(summary.pendingVerify), icon: ClipboardList, color: colors.warning, bg: colors.warningSoft, ring: colors.warningBorder },
+        { label: "Total Amount", value: formatINR(summary.totalAmount), icon: IndianRupee, color: colors.primary, bg: colors.primarySofter, ring: colors.primaryBorder },
+        { label: "Paid", value: formatINR(summary.paidAmount), icon: Wallet, color: colors.success, bg: colors.successSoft, ring: colors.successBorder },
+        { label: "Remaining", value: formatINR(summary.remainingAmount), icon: Package, color: colors.danger, bg: colors.dangerSoft, ring: colors.dangerBorder },
+        { label: "Total Hold", value: formatINR(summary.totalPenalty), icon: AlertCircle, color: colors.danger, bg: colors.dangerSoft, ring: colors.dangerBorder },
+      ]
+    : [];
 
   const statusColors: Record<string, string> = {
     active: colors.success,
@@ -158,8 +181,8 @@ export default function AdminDashboard() {
                 <Text style={s.roleBadgeText}>ADMIN · FULL ACCESS</Text>
               </View>
             </View>
-            <Pressable onPress={handleLogout} style={s.logoutBtn} hitSlop={8}>
-              <LogOut color={colors.white} size={20} />
+            <Pressable onPress={goToNotifications} style={s.logoutBtn} hitSlop={8}>
+              <Bell color={colors.white} size={20} />
             </Pressable>
           </View>
 
@@ -173,34 +196,44 @@ export default function AdminDashboard() {
 
             <Text style={s.sectionTitle}>OVERVIEW</Text>
             <View style={s.statsGrid}>
-              {stats.map((stat) => (
-                <View key={stat.label} style={[s.statCard, { backgroundColor: stat.bg, borderColor: stat.ring }]}>
-                  <View style={[s.statIconWrap, { backgroundColor: colors.white }]}>
-                    <stat.icon color={stat.color} size={18} />
+              {summaryLoading && !summary ? (
+                [0, 1, 2].map((i) => <View key={i} style={[s.statCard, s.statSkeleton]} />)
+              ) : (
+                stats.map((stat) => (
+                  <View
+                    key={stat.label}
+                    style={[s.statCard, { backgroundColor: stat.bg, borderColor: stat.ring }]}
+                  >
+                    <View style={[s.statIconWrap, { backgroundColor: colors.white }]}>
+                      <stat.icon color={stat.color} size={18} />
+                    </View>
+                    <Text style={[s.statValue, { color: stat.color }]} numberOfLines={1}>
+                      {stat.value}
+                    </Text>
+                    <Text style={s.statLabel}>{stat.label}</Text>
                   </View>
-                  <Text style={[s.statValue, { color: stat.color }]} numberOfLines={1}>
-                    {stat.value}
-                  </Text>
-                  <Text style={s.statLabel}>{stat.label}</Text>
-                </View>
-              ))}
+                ))
+              )}
             </View>
 
             <Text style={s.sectionTitle}>RECENT CONTAINERS</Text>
             {containers.slice(0, 4).map((container) => {
-              const verified = getVerifiedForContainer(pdiVerifications, container._id);
+              const verified = container.verifiedQuantity ?? getVerifiedForContainer(pdiVerifications, container._id);
               const payment = findPaymentForContainer(payments, container._id);
               const progress = container.quantity > 0
                 ? Math.min((verified / container.quantity) * 100, 100)
                 : 0;
               const statusColor = statusColors[container.status] ?? colors.textMuted;
+              const penaltyPerUnit = container.penaltyPerUnit ?? 0;
+              const pending = container.pendingQuantity ?? Math.max(0, container.quantity - verified);
+              const totalPenalty = container.totalPenalty ?? pending * penaltyPerUnit;
               return (
                 <Card key={container._id} style={s.jobCard} variant="elevated" padding={16}>
                   <View style={s.jobCardTop}>
                     <View style={s.jobLeft}>
                       <Text style={s.jobModel}>{container.model}</Text>
                       <Text style={s.jobTeam}>
-                        {getTeamName(container)} · {container.date}
+                        {getTeamName(container)} · {formatDateOnly(container.date)}
                       </Text>
                     </View>
                     <View style={[s.badge, { backgroundColor: statusBg[container.status] ?? colors.surfaceAlt }]}>
@@ -222,6 +255,11 @@ export default function AdminDashboard() {
                     <JobStat label="Verified" value={String(verified)} color={colors.success} />
                     <JobStat label="Rate" value={`₹${container.ratePerUnit}`} color={colors.primary} />
                     <JobStat label="Due" value={`₹${payment?.remainingAmount.toLocaleString() ?? 0}`} color={colors.danger} />
+                  </View>
+                  <View style={s.penaltyRow}>
+                    <JobStat label="Pending" value={String(pending)} color={colors.danger} />
+                    <JobStat label="Hold/Veh" value={`₹${penaltyPerUnit}`} color={colors.danger} />
+                    <JobStat label="Total Hold" value={formatINR(totalPenalty)} color={colors.danger} />
                   </View>
                 </Card>
               );
@@ -366,6 +404,11 @@ const s = StyleSheet.create({
     gap: 10,
     borderWidth: 1,
   },
+  statSkeleton: {
+    height: 110,
+    backgroundColor: colors.surfaceAlt,
+    borderColor: colors.borderSoft,
+  },
   statIconWrap: {
     width: 34,
     height: 34,
@@ -397,6 +440,14 @@ const s = StyleSheet.create({
   },
   progressFill: { height: "100%", borderRadius: radius.full },
   jobStats: { flexDirection: "row", justifyContent: "space-between" },
+  penaltyRow: {
+    flexDirection: "row",
+    justifyContent: "space-between",
+    marginTop: 12,
+    paddingTop: 12,
+    borderTopWidth: 1,
+    borderTopColor: colors.dangerBorder,
+  },
   jobStat: { alignItems: "center", flex: 1 },
   jobStatLbl: {
     fontFamily: fonts.medium,

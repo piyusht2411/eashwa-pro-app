@@ -1,7 +1,9 @@
 import { useAuthStore } from "@/stores/authStore";
+import { editIncompleteVerification, getProductionLogById } from "@/lib/api";
 import { isNearScrollBottom } from "@/lib/scrollPagination";
 import { PDIVerification, ProductionLog, useProductionStore } from "@/stores/productionStore";
-import { AlertTriangle, CheckCircle, ClipboardCheck, X } from "lucide-react-native";
+import { GradientHeader } from "@/components/ui/GradientHeader";
+import { AlertTriangle, CheckCircle, ClipboardCheck, Edit3, RotateCcw, X } from "lucide-react-native";
 import { useCallback, useEffect, useState } from "react";
 import {
   ActivityIndicator,
@@ -28,6 +30,14 @@ const getLogTeamName = (log: ProductionLog) =>
 const getVerificationContainerModel = (verification: PDIVerification) =>
   typeof verification.container === "string" ? "Job" : verification.container.model;
 
+const getLogPenaltyPerUnit = (log: ProductionLog) =>
+  typeof log.container === "string" ? 0 : log.container.penaltyPerUnit ?? 0;
+
+const getVerificationLogId = (verification: PDIVerification) =>
+  typeof verification.productionLog === "string"
+    ? verification.productionLog
+    : verification.productionLog._id;
+
 const toSafeNumber = (value: unknown) => {
   const numberValue = Number(value);
   return Number.isFinite(numberValue) ? numberValue : 0;
@@ -36,14 +46,24 @@ const toSafeNumber = (value: unknown) => {
 export default function PdiVerify() {
   const insets = useSafeAreaInsets();
   const { token } = useAuthStore();
-  const { pendingVerificationsPagination, productionLogs, pdiVerifications, fetchPendingVerifications, verifyProductionLog } =
+  const { pendingVerificationsPagination, productionLogs, pdiVerifications, fetchPendingVerifications, fetchPDIDashboard, verifyProductionLog, unverifyProductionLog } =
     useProductionStore();
+  const [unverifyingId, setUnverifyingId] = useState<string | null>(null);
   const [selected, setSelected] = useState<string | null>(null);
   const [verifiedQty, setVerifiedQty] = useState("");
   const [note, setNote] = useState("");
   const [refreshing, setRefreshing] = useState(false);
   const [loadingMore, setLoadingMore] = useState(false);
   const [submitting, setSubmitting] = useState(false);
+
+  // Edit incomplete verification state
+  const [editing, setEditing] = useState<PDIVerification | null>(null);
+  const [editQty, setEditQty] = useState("");
+  const [editRemarks, setEditRemarks] = useState("");
+  const [editReported, setEditReported] = useState<number | null>(null);
+  const [editTeamName, setEditTeamName] = useState<string>("");
+  const [editLoading, setEditLoading] = useState(false);
+  const [editSubmitting, setEditSubmitting] = useState(false);
 
   const pending = productionLogs.filter((log) => log.status === "pending");
   const done = pdiVerifications;
@@ -96,6 +116,71 @@ export default function PdiVerify() {
     setNote("");
   };
 
+  const openEdit = async (verification: PDIVerification) => {
+    setEditing(verification);
+    setEditQty(String(verification.verifiedQuantity ?? ""));
+    setEditRemarks(verification.remarks ?? "");
+    setEditReported(null);
+    setEditTeamName("");
+    if (!token) return;
+    const logId =
+      typeof verification.productionLog === "string"
+        ? verification.productionLog
+        : verification.productionLog._id;
+    if (!logId) return;
+    setEditLoading(true);
+    try {
+      const res = await getProductionLogById(logId, token);
+      const log = res.log as any;
+      if (log) {
+        setEditReported(log.reportedQuantity ?? null);
+        if (log.team && typeof log.team === "object" && log.team.name) {
+          setEditTeamName(log.team.name);
+        }
+      }
+    } catch {
+      // Non-fatal — fields stay empty
+    } finally {
+      setEditLoading(false);
+    }
+  };
+
+  const closeEdit = () => {
+    setEditing(null);
+    setEditQty("");
+    setEditRemarks("");
+    setEditReported(null);
+    setEditTeamName("");
+  };
+
+  const handleSaveEdit = async () => {
+    if (editSubmitting || !editing || !token) return;
+    const qty = Number(editQty);
+    if (!editQty || Number.isNaN(qty) || qty < 0) {
+      Alert.alert("Error", "Enter a valid corrected quantity");
+      return;
+    }
+    if (editReported != null && qty > editReported) {
+      Alert.alert("Error", `Corrected quantity cannot exceed reported (${editReported})`);
+      return;
+    }
+    setEditSubmitting(true);
+    try {
+      await editIncompleteVerification(
+        editing._id,
+        { verifiedQuantity: qty, remarks: editRemarks || undefined },
+        token,
+      );
+      closeEdit();
+      await fetchPendingVerifications(token);
+      Alert.alert("Updated", "Verification corrected");
+    } catch (e: any) {
+      Alert.alert("Error", e.message || "Failed to update verification");
+    } finally {
+      setEditSubmitting(false);
+    }
+  };
+
   const handleVerify = async () => {
     if (submitting) return;
     if (!selected || !verifiedQty) {
@@ -131,20 +216,51 @@ export default function PdiVerify() {
     }
   };
 
+  const handleUnverify = (verification: PDIVerification) => {
+    const logId = getVerificationLogId(verification);
+    if (!logId || !token) return;
+    Alert.alert(
+      "Unverify entry?",
+      "This will revert the verification and send the entry back to pending for re-verification.",
+      [
+        { text: "Cancel", style: "cancel" },
+        {
+          text: "Unverify",
+          style: "destructive",
+          onPress: async () => {
+            if (!token) return;
+            setUnverifyingId(verification._id);
+            try {
+              await unverifyProductionLog(logId, token);
+              await Promise.all([fetchPendingVerifications(token), fetchPDIDashboard(token)]);
+              Alert.alert("Reverted", "Entry sent back to pending");
+            } catch (error: any) {
+              Alert.alert("Error", error.message || "Failed to unverify");
+            } finally {
+              setUnverifyingId(null);
+            }
+          },
+        },
+      ],
+    );
+  };
+
   return (
-    <SafeAreaView style={s.safe}>
+    <View style={s.safe}>
+      <GradientHeader
+        title="Verify Production"
+        subtitle="Approve or flag reported quantities"
+        leftIcon={<ClipboardCheck color="#fff" size={20} />}
+      />
       <ScrollView
         showsVerticalScrollIndicator={false}
         onScroll={({ nativeEvent }) => {
           if (isNearScrollBottom(nativeEvent)) handleLoadMore();
         }}
         scrollEventThrottle={400}
+        contentContainerStyle={{ paddingTop: 16 }}
         refreshControl={<RefreshControl refreshing={refreshing} onRefresh={handleRefresh} tintColor="#F97316" />}
       >
-        <View style={s.header}>
-          <ClipboardCheck color="#F97316" size={24} />
-          <Text style={s.title}>Verify Production</Text>
-        </View>
 
         <Text style={s.sectionLabel}>PENDING VERIFICATION ({pending.length})</Text>
         {pending.length === 0 && (
@@ -170,6 +286,11 @@ export default function PdiVerify() {
               <Text style={s.reportedLabel}>Team reported:</Text>
               <Text style={s.reportedValue}>{log.reportedQuantity} units</Text>
             </View>
+            {getLogPenaltyPerUnit(log) > 0 && (
+              <View style={s.penaltyPill}>
+                <Text style={s.penaltyPillText}>Hold / vehicle: Rs {getLogPenaltyPerUnit(log)}</Text>
+              </View>
+            )}
             <Pressable onPress={() => openVerify(log)} style={s.verifyBtn}>
               <ClipboardCheck color="#fff" size={16} />
               <Text style={s.verifyBtnText}>Verify Now</Text>
@@ -211,6 +332,28 @@ export default function PdiVerify() {
                     )}
                   </View>
                   {verification.remarks && <Text style={s.doneNote}>{verification.remarks}</Text>}
+                  <View style={s.doneActions}>
+                    {verification.isIncomplete && (
+                      <Pressable onPress={() => openEdit(verification)} style={s.editBtn}>
+                        <Edit3 color="#D97706" size={14} />
+                        <Text style={s.editBtnText}>Edit</Text>
+                      </Pressable>
+                    )}
+                    <Pressable
+                      onPress={() => handleUnverify(verification)}
+                      disabled={unverifyingId === verification._id}
+                      style={s.unverifyBtn}
+                    >
+                      {unverifyingId === verification._id ? (
+                        <ActivityIndicator color="#DC2626" size="small" />
+                      ) : (
+                        <>
+                          <RotateCcw color="#DC2626" size={14} />
+                          <Text style={s.unverifyBtnText}>Unverify</Text>
+                        </>
+                      )}
+                    </Pressable>
+                  </View>
                 </View>
               );
             })}
@@ -219,6 +362,95 @@ export default function PdiVerify() {
         {loadingMore && <ActivityIndicator color="#F97316" style={{ marginVertical: 16 }} />}
         <View style={{ height: 24 }} />
       </ScrollView>
+
+      {/* Edit incomplete modal */}
+      <Modal visible={!!editing} transparent animationType="slide" onRequestClose={closeEdit}>
+        <View style={s.overlay}>
+          <KeyboardAvoidingView behavior={Platform.OS === "ios" ? "padding" : "height"} style={s.keyboardAvoid}>
+            <View style={s.modal}>
+              <ScrollView
+                keyboardShouldPersistTaps="handled"
+                showsVerticalScrollIndicator={false}
+                contentContainerStyle={{ paddingBottom: Math.max(insets.bottom, 24) }}
+              >
+                <View style={s.modalHeader}>
+                  <Text style={s.modalTitle}>Edit Verification</Text>
+                  <Pressable onPress={closeEdit}>
+                    <X color="#94A3B8" size={22} />
+                  </Pressable>
+                </View>
+
+                {editing && (
+                  <>
+                    <View style={s.modalInfo}>
+                      <Text style={s.modalModel}>
+                        {typeof editing.container === "string"
+                          ? "Container"
+                          : editing.container.model ?? "Container"}
+                      </Text>
+                      <Text style={s.modalMeta}>
+                        {editTeamName || "Team"} · {new Date(editing.verifiedAt).toLocaleDateString()}
+                      </Text>
+                      <View style={s.editInfoRow}>
+                        <View style={s.editInfoCell}>
+                          <Text style={s.editInfoLabel}>Reported</Text>
+                          <Text style={s.editInfoValue}>
+                            {editLoading ? "…" : editReported != null ? editReported : "—"}
+                          </Text>
+                        </View>
+                        <View style={s.editInfoCell}>
+                          <Text style={s.editInfoLabel}>Current verified</Text>
+                          <Text style={[s.editInfoValue, { color: "#D97706" }]}>
+                            {editing.verifiedQuantity}
+                          </Text>
+                        </View>
+                      </View>
+                    </View>
+
+                    <View style={s.fieldWrap}>
+                      <Text style={s.fieldLabel}>Corrected quantity</Text>
+                      <TextInput
+                        style={s.fieldInput}
+                        value={editQty}
+                        onChangeText={setEditQty}
+                        placeholder="Enter corrected count"
+                        placeholderTextColor="#CBD5E1"
+                        keyboardType="numeric"
+                        returnKeyType="done"
+                        editable={!editSubmitting}
+                      />
+                    </View>
+
+                    <View style={s.fieldWrap}>
+                      <Text style={s.fieldLabel}>Remarks (optional)</Text>
+                      <TextInput
+                        style={s.fieldInput}
+                        value={editRemarks}
+                        onChangeText={setEditRemarks}
+                        placeholder="e.g. recount after rework"
+                        placeholderTextColor="#CBD5E1"
+                        editable={!editSubmitting}
+                      />
+                    </View>
+
+                    <Pressable
+                      onPress={handleSaveEdit}
+                      disabled={editSubmitting}
+                      style={[s.confirmBtn, editSubmitting && s.confirmBtnDisabled]}
+                    >
+                      {editSubmitting ? (
+                        <ActivityIndicator color="#fff" />
+                      ) : (
+                        <Text style={s.confirmBtnText}>Save correction</Text>
+                      )}
+                    </Pressable>
+                  </>
+                )}
+              </ScrollView>
+            </View>
+          </KeyboardAvoidingView>
+        </View>
+      </Modal>
 
       <Modal visible={!!selected} transparent animationType="slide">
         <View style={s.overlay}>
@@ -310,7 +542,7 @@ export default function PdiVerify() {
           </KeyboardAvoidingView>
         </View>
       </Modal>
-    </SafeAreaView>
+    </View>
   );
 }
 
@@ -342,6 +574,51 @@ const s = StyleSheet.create({
   doneStatLabel: { fontSize: 10, color: "#94A3B8" },
   doneStatValue: { fontSize: 15, fontWeight: "700", color: "#0F172A" },
   doneNote: { fontSize: 12, color: "#D97706", marginTop: 8 },
+  editBtn: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 6,
+    alignSelf: "flex-start",
+    marginTop: 10,
+    backgroundColor: "#FFFBEB",
+    borderWidth: 1,
+    borderColor: "#FDE68A",
+    paddingHorizontal: 10,
+    paddingVertical: 6,
+    borderRadius: 8,
+  },
+  editBtnText: { fontSize: 12, fontWeight: "700", color: "#D97706" },
+  doneActions: { flexDirection: "row", gap: 8, marginTop: 10 },
+  unverifyBtn: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 6,
+    alignSelf: "flex-start",
+    backgroundColor: "#FEF2F2",
+    borderWidth: 1,
+    borderColor: "#FECACA",
+    paddingHorizontal: 10,
+    paddingVertical: 6,
+    borderRadius: 8,
+    minWidth: 92,
+    justifyContent: "center",
+  },
+  unverifyBtnText: { fontSize: 12, fontWeight: "700", color: "#DC2626" },
+  penaltyPill: {
+    backgroundColor: "#FEF2F2",
+    borderRadius: 8,
+    paddingVertical: 6,
+    paddingHorizontal: 12,
+    alignSelf: "flex-start",
+    borderWidth: 1,
+    borderColor: "#FECACA",
+    marginBottom: 14,
+  },
+  penaltyPillText: { fontSize: 12, fontWeight: "700", color: "#DC2626" },
+  editInfoRow: { flexDirection: "row", marginTop: 12, gap: 16 },
+  editInfoCell: { flex: 1 },
+  editInfoLabel: { fontSize: 10, color: "#94A3B8", letterSpacing: 0.4, marginBottom: 3 },
+  editInfoValue: { fontSize: 16, fontWeight: "700", color: "#0F172A" },
   overlay: { flex: 1, backgroundColor: "#00000080", justifyContent: "flex-end" },
   keyboardAvoid: { width: "100%" },
   modal: { backgroundColor: "#FFFFFF", borderTopLeftRadius: 28, borderTopRightRadius: 28, padding: 24, borderTopWidth: 1, borderColor: "#E2E8F0", maxHeight: "90%" },

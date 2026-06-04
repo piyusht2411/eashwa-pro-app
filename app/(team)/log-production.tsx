@@ -1,7 +1,10 @@
 import { useAuthStore } from "@/stores/authStore";
 import { isNearScrollBottom } from "@/lib/scrollPagination";
+import { colors as theme } from "@/lib/theme";
+import { formatDateOnly } from "@/lib/utils";
 import { Container, ProductionLog, useProductionStore } from "@/stores/productionStore";
-import { ClipboardList, Plus } from "lucide-react-native";
+import { GradientHeader } from "@/components/ui/GradientHeader";
+import { ClipboardList, Plus, Target } from "lucide-react-native";
 import { useCallback, useEffect, useState } from "react";
 import { ActivityIndicator, Alert, Pressable, RefreshControl, ScrollView, StyleSheet, Text, TextInput, View } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
@@ -107,19 +110,21 @@ export default function LogProduction() {
   };
 
   return (
-    <SafeAreaView style={s.safe}>
+    <View style={s.safe}>
+      <GradientHeader
+        title="Log Production"
+        subtitle="Submit your daily output"
+        leftIcon={<ClipboardList color="#fff" size={20} />}
+      />
       <ScrollView
         showsVerticalScrollIndicator={false}
         onScroll={({ nativeEvent }) => {
           if (isNearScrollBottom(nativeEvent)) handleLoadMore();
         }}
         scrollEventThrottle={400}
+        contentContainerStyle={{ paddingTop: 16 }}
         refreshControl={<RefreshControl refreshing={refreshing} onRefresh={handleRefresh} tintColor="#F97316" />}
       >
-        <View style={s.header}>
-          <ClipboardList color="#F97316" size={24} />
-          <Text style={s.title}>Log Production</Text>
-        </View>
 
         <Text style={s.sectionLabel}>SELECT JOB</Text>
         {myContainers.length === 0 ? (
@@ -142,6 +147,49 @@ export default function LogProduction() {
             ))}
           </ScrollView>
         )}
+
+        {selected && (() => {
+          const targetTotal = selected.quantity;
+          const verifiedSoFar = logsForSelected.reduce(
+            (sum, log) => sum + (log.verifiedQuantity ?? 0),
+            0,
+          );
+          const remaining = Math.max(0, targetTotal - verifiedSoFar);
+          const pct = targetTotal > 0 ? Math.min((verifiedSoFar / targetTotal) * 100, 100) : 0;
+          const remainColor = remaining > 0 ? theme.warning : theme.success;
+          return (
+            <View style={s.progressCard}>
+              <View style={s.progressHeader}>
+                <Target color={theme.primary} size={16} />
+                <Text style={s.progressTitle}>Target Progress</Text>
+              </View>
+              <View style={s.progressStatsRow}>
+                <View style={s.progressStat}>
+                  <Text style={s.progressStatLabel}>Target</Text>
+                  <Text style={s.progressStatValue}>{targetTotal} units</Text>
+                </View>
+                <View style={s.progressStat}>
+                  <Text style={s.progressStatLabel}>Verified so far</Text>
+                  <Text style={[s.progressStatValue, { color: theme.success }]}>
+                    {verifiedSoFar} units
+                  </Text>
+                </View>
+                <View style={s.progressStat}>
+                  <Text style={s.progressStatLabel}>Remaining</Text>
+                  <Text style={[s.progressStatValue, { color: remainColor }]}>
+                    {remaining} units
+                  </Text>
+                </View>
+              </View>
+              <View style={s.progressTrack}>
+                <View
+                  style={[s.progressFill, { width: `${pct}%` as any, backgroundColor: theme.primary }]}
+                />
+              </View>
+              <Text style={s.progressPct}>{pct.toFixed(0)}% complete</Text>
+            </View>
+          );
+        })()}
 
         {selected && (
           <View style={s.formCard}>
@@ -197,7 +245,7 @@ export default function LogProduction() {
             {logsForSelected.map((log) => (
               <View key={log._id} style={s.logCard}>
                 <View style={s.logTop}>
-                  <Text style={s.logDate}>{log.date}</Text>
+                  <Text style={s.logDate}>{formatDateOnly(log.date)}</Text>
                   <Text style={[s.logStatus, { color: log.status === "verified" ? "#059669" : "#D97706" }]}>
                     {log.status.toUpperCase()}
                   </Text>
@@ -216,7 +264,7 @@ export default function LogProduction() {
         {loadingMore && <ActivityIndicator color="#F97316" style={{ marginVertical: 16 }} />}
         <View style={{ height: 24 }} />
       </ScrollView>
-    </SafeAreaView>
+    </View>
   );
 }
 
@@ -232,6 +280,16 @@ const s = StyleSheet.create({
   jobChipRate: { fontSize: 11, color: "#64748B" },
   emptyCard: { marginHorizontal: 20, padding: 24, backgroundColor: "#FFFFFF", borderRadius: 16, borderWidth: 1, borderColor: "#E2E8F0", alignItems: "center", marginBottom: 16 },
   emptyText: { color: "#94A3B8", fontSize: 14 },
+  progressCard: { marginHorizontal: 20, marginBottom: 14, backgroundColor: "#FFFFFF", borderRadius: 16, borderWidth: 1, borderColor: "#E2E8F0", padding: 14 },
+  progressHeader: { flexDirection: "row", alignItems: "center", gap: 6, marginBottom: 12 },
+  progressTitle: { fontSize: 13, fontWeight: "700", color: "#0F172A", letterSpacing: 0.3 },
+  progressStatsRow: { flexDirection: "row", justifyContent: "space-between", marginBottom: 12 },
+  progressStat: { alignItems: "center", flex: 1 },
+  progressStatLabel: { fontSize: 10, color: "#94A3B8", letterSpacing: 0.4, marginBottom: 3 },
+  progressStatValue: { fontSize: 14, fontWeight: "700", color: "#0F172A" },
+  progressTrack: { height: 8, backgroundColor: "#F1F5F9", borderRadius: 10, overflow: "hidden" },
+  progressFill: { height: "100%", borderRadius: 10 },
+  progressPct: { fontSize: 11, color: "#64748B", marginTop: 6, textAlign: "right", fontWeight: "600" },
   formCard: { marginHorizontal: 20, marginBottom: 20, backgroundColor: "#FFFFFF", borderRadius: 18, borderWidth: 1, borderColor: "#E2E8F0", padding: 16 },
   formTitle: { fontSize: 16, fontWeight: "700", color: "#0F172A", marginBottom: 16 },
   fieldWrap: { marginBottom: 14 },

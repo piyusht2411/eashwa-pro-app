@@ -4,10 +4,11 @@ import { colors, fonts, radius, shadow } from "@/lib/theme";
 import { useAuthStore } from "@/stores/authStore";
 import { LinearGradient } from "expo-linear-gradient";
 import { router } from "expo-router";
-import { Lock, Mail, Zap } from "lucide-react-native";
+import { Lock, Mail } from "lucide-react-native";
 import { useState } from "react";
 import {
   Alert,
+  Image,
   KeyboardAvoidingView,
   Platform,
   ScrollView,
@@ -15,9 +16,10 @@ import {
   Text,
   View,
 } from "react-native";
-import { SafeAreaView } from "react-native-safe-area-context";
+import { SafeAreaView, useSafeAreaInsets } from "react-native-safe-area-context";
 
 export default function Login() {
+  const insets = useSafeAreaInsets();
   const { login } = useAuthStore();
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
@@ -62,22 +64,25 @@ export default function Login() {
 
       <SafeAreaView style={s.safe} edges={["top", "bottom"]}>
         <KeyboardAvoidingView
-          behavior={Platform.OS === "ios" ? "padding" : undefined}
+          behavior={Platform.OS === "ios" ? "padding" : "height"}
+          keyboardVerticalOffset={Platform.OS === "ios" ? 0 : 24}
           style={s.flex}
         >
           <ScrollView
-            contentContainerStyle={s.scroll}
+            contentContainerStyle={[s.scroll, { paddingBottom: insets.bottom + 240 }]}
             keyboardShouldPersistTaps="handled"
+            keyboardDismissMode="interactive"
             showsVerticalScrollIndicator={false}
           >
             <View style={s.header}>
               <View style={s.logoWrap}>
-                <LinearGradient
-                  colors={["#FFFFFF", "#FFEDD5"]}
-                  style={s.logoInner}
-                >
-                  <Zap color={colors.primary} size={32} strokeWidth={2.5} fill={colors.primary} />
-                </LinearGradient>
+                <View style={s.logoInner}>
+                  <Image
+                    source={require("../../assets/images/splash-icon.png")}
+                    style={s.logoImage}
+                    resizeMode="contain"
+                  />
+                </View>
               </View>
               <Text style={s.appName}>Eashwa PRO</Text>
               <Text style={s.tagline}>Production · Verification · Payment</Text>
@@ -173,12 +178,17 @@ const s = StyleSheet.create({
     padding: 6,
   },
   logoInner: {
-    width: "100%",
-    height: "100%",
+    width: 72,
+    height: 72,
     borderRadius: 20,
-    alignItems: "center",
+    backgroundColor: "#fff",
     justifyContent: "center",
-    ...(shadow.lg as object),
+    alignItems: "center",
+  },
+
+  logoImage: {
+    width: 50,
+    height: 50,
   },
   appName: {
     fontFamily: fonts.extrabold,

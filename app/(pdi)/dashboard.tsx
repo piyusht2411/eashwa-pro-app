@@ -5,7 +5,7 @@ import { useAuthStore } from "@/stores/authStore";
 import { PDIVerification, useProductionStore } from "@/stores/productionStore";
 import { LinearGradient } from "expo-linear-gradient";
 import { router } from "expo-router";
-import { AlertTriangle, CheckCircle, Clock, LayoutDashboard, LogOut } from "lucide-react-native";
+import { AlertTriangle, Bell, CheckCircle, Clock, IndianRupee, LayoutDashboard } from "lucide-react-native";
 import { useCallback, useEffect, useState } from "react";
 import {
   ActivityIndicator,
@@ -22,17 +22,22 @@ import { SafeAreaView } from "react-native-safe-area-context";
 const getVerificationContainerModel = (v: PDIVerification) =>
   typeof v.container === "string" ? "Job" : v.container.model ?? "Job";
 
+const getVerificationReportedQuantity = (v: PDIVerification) =>
+  typeof v.productionLog === "string" ? null : v.productionLog.reportedQuantity ?? null;
+
 const toSafeNumber = (value: unknown) => {
   const n = Number(value);
   return Number.isFinite(n) ? n : 0;
 };
 
 export default function PdiDashboard() {
-  const { user, token, logout } = useAuthStore();
+  const { user, token } = useAuthStore();
   const {
     productionLogs,
     pdiDashboardPagination,
     pdiPendingCount,
+    pdiTotalPenalty,
+    pdiTotalPendingVehicles,
     pdiVerifications,
     fetchPDIDashboard,
     fetchPendingVerifications,
@@ -79,13 +84,9 @@ export default function PdiDashboard() {
   const pendingCount = Math.max(pdiPendingCount, pending.length);
   const verified = pdiVerifications.filter((v) => !v.isIncomplete);
   const incomplete = pdiVerifications.filter((v) => v.isIncomplete);
-  const totalVerifiedQty = pdiVerifications.reduce((s, v) => s + toSafeNumber(v.verifiedQuantity), 0);
   const discrepancy = pdiVerifications.reduce((s, v) => s + toSafeNumber(v.missingQuantity), 0);
 
-  const handleLogout = async () => {
-    await logout();
-    router.replace("/(auth)/login");
-  };
+  const goToNotifications = () => router.push("/(pdi)/notifications" as any);
 
   const stats = [
     { label: "Pending", value: String(pendingCount), color: colors.warning, bg: colors.warningSoft, ring: colors.warningBorder, icon: Clock },
@@ -121,8 +122,8 @@ export default function PdiDashboard() {
                 <Text style={s.roleBadgeText}>PDI INSPECTOR</Text>
               </View>
             </View>
-            <Pressable onPress={handleLogout} style={s.logoutBtn} hitSlop={8}>
-              <LogOut color={colors.white} size={20} />
+            <Pressable onPress={goToNotifications} style={s.logoutBtn} hitSlop={8}>
+              <Bell color={colors.white} size={20} />
             </Pressable>
           </View>
 
@@ -139,6 +140,20 @@ export default function PdiDashboard() {
                   <Text style={s.statLabel}>{stat.label}</Text>
                 </View>
               ))}
+            </View>
+
+            <View style={s.penaltyCard}>
+              <View style={s.penaltyIcon}>
+                <IndianRupee color={colors.danger} size={22} />
+              </View>
+              <View style={{ flex: 1 }}>
+                <Text style={s.penaltyLabel}>TOTAL HOLD</Text>
+                <Text style={s.penaltyValue}>Rs {pdiTotalPenalty.toLocaleString("en-IN")}</Text>
+              </View>
+              <View style={s.penaltyPendingWrap}>
+                <Text style={s.penaltyPendingValue}>{pdiTotalPendingVehicles}</Text>
+                <Text style={s.penaltyPendingLabel}>pending vehicles</Text>
+              </View>
             </View>
 
             {pendingCount > 0 && (
@@ -166,6 +181,7 @@ export default function PdiDashboard() {
               const bg = v.isIncomplete ? colors.warningSoft : colors.successSoft;
               const verifiedQuantity = toSafeNumber(v.verifiedQuantity);
               const missingQuantity = toSafeNumber(v.missingQuantity);
+              const reportedQuantity = getVerificationReportedQuantity(v) ?? verifiedQuantity + missingQuantity;
               return (
                 <Card key={v._id} variant="elevated" style={s.card} padding={14}>
                   <View style={s.cardTop}>
@@ -189,8 +205,8 @@ export default function PdiDashboard() {
                       <Text style={[s.cardStatValue, { color: colors.danger }]}>{missingQuantity}</Text>
                     </View>
                     <View style={s.cardStat}>
-                      <Text style={s.cardStatLabel}>Total Verified</Text>
-                      <Text style={s.cardStatValue}>{totalVerifiedQty}</Text>
+                      <Text style={s.cardStatLabel}>Reported</Text>
+                      <Text style={s.cardStatValue}>{reportedQuantity}</Text>
                     </View>
                   </View>
                   {v.remarks ? <Text style={s.cardNote}>{v.remarks}</Text> : null}
@@ -264,6 +280,31 @@ const s = StyleSheet.create({
   },
   statValue: { fontFamily: fonts.extrabold, fontSize: 22, letterSpacing: -0.3 },
   statLabel: { fontFamily: fonts.medium, fontSize: 12, color: colors.textMuted },
+  penaltyCard: {
+    marginHorizontal: 20,
+    marginBottom: 20,
+    backgroundColor: colors.dangerSoft,
+    borderRadius: radius.lg,
+    borderWidth: 1,
+    borderColor: colors.dangerBorder,
+    flexDirection: "row",
+    alignItems: "center",
+    padding: 16,
+    gap: 12,
+  },
+  penaltyIcon: {
+    width: 44,
+    height: 44,
+    borderRadius: 12,
+    backgroundColor: colors.white,
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  penaltyLabel: { fontFamily: fonts.bold, fontSize: 10, color: colors.danger, letterSpacing: 1.2 },
+  penaltyValue: { fontFamily: fonts.extrabold, fontSize: 22, color: colors.danger, marginTop: 2 },
+  penaltyPendingWrap: { alignItems: "flex-end" },
+  penaltyPendingValue: { fontFamily: fonts.extrabold, fontSize: 20, color: colors.danger },
+  penaltyPendingLabel: { fontFamily: fonts.medium, fontSize: 10, color: colors.textMuted },
   alertCard: {
     marginHorizontal: 20,
     marginBottom: 20,

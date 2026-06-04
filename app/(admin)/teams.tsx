@@ -1,7 +1,8 @@
 import { useAuthStore } from "@/stores/authStore";
 import { isNearScrollBottom } from "@/lib/scrollPagination";
 import { Team, useProductionStore } from "@/stores/productionStore";
-import { Edit3, Eye, EyeOff, Mail, Phone, Plus, Trash2, X } from "lucide-react-native";
+import { GradientHeader } from "@/components/ui/GradientHeader";
+import { Edit3, Eye, EyeOff, Mail, Phone, Plus, Trash2, Users, X } from "lucide-react-native";
 import { useEffect, useState } from "react";
 import {
   ActivityIndicator,
@@ -191,14 +192,19 @@ export default function AdminTeams() {
   };
 
   return (
-    <SafeAreaView style={s.safe}>
-      <View style={s.header}>
-        <Text style={s.title}>Teams Management</Text>
-        <Pressable onPress={openCreateModal} style={s.addBtn}>
-          <Plus color="#fff" size={18} />
-          <Text style={s.addBtnText}>New Team</Text>
-        </Pressable>
-      </View>
+    <View style={s.safe}>
+      <GradientHeader
+        title="Teams"
+        subtitle="Production and PDI users"
+        showBack
+        leftIcon={<Users color="#fff" size={20} />}
+        right={
+          <Pressable onPress={openCreateModal} style={s.addBtn}>
+            <Plus color="#fff" size={16} />
+            <Text style={s.addBtnText}>New</Text>
+          </Pressable>
+        }
+      />
 
       <ScrollView
         showsVerticalScrollIndicator={false}
@@ -243,17 +249,25 @@ export default function AdminTeams() {
         <View style={{ height: 20 }} />
       </ScrollView>
 
-      <Modal visible={showModal} transparent animationType="slide">
+      <Modal
+        visible={showModal}
+        transparent
+        animationType="slide"
+        statusBarTranslucent
+        onRequestClose={closeModal}
+      >
         <View style={s.overlay}>
           <KeyboardAvoidingView
             behavior={Platform.OS === "ios" ? "padding" : "height"}
+            keyboardVerticalOffset={Platform.OS === "ios" ? 0 : 24}
             style={s.keyboardAvoid}
           >
             <View style={s.modal}>
               <ScrollView
                 keyboardShouldPersistTaps="handled"
+                keyboardDismissMode="interactive"
                 showsVerticalScrollIndicator={false}
-                contentContainerStyle={{ paddingBottom: Math.max(insets.bottom, 24) }}
+                contentContainerStyle={{ paddingBottom: insets.bottom + 120 }}
               >
                 <View style={s.modalHeader}>
                   <Text style={s.modalTitle}>
@@ -378,7 +392,7 @@ export default function AdminTeams() {
           </KeyboardAvoidingView>
         </View>
       </Modal>
-    </SafeAreaView>
+    </View>
   );
 }
 
@@ -466,11 +480,11 @@ const s = StyleSheet.create({
   addBtn: {
     flexDirection: "row",
     alignItems: "center",
-    gap: 6,
-    backgroundColor: "#F97316",
-    borderRadius: 12,
-    paddingHorizontal: 14,
-    paddingVertical: 9,
+    gap: 5,
+    backgroundColor: "rgba(255,255,255,0.22)",
+    borderRadius: 10,
+    paddingHorizontal: 12,
+    paddingVertical: 8,
   },
   addBtnText: { color: "#fff", fontWeight: "700", fontSize: 13 },
   loadingCard: {
@@ -588,9 +602,12 @@ const s = StyleSheet.create({
   overlay: {
     flex: 1,
     backgroundColor: "#00000040",
+  },
+  keyboardAvoid: {
+    flex: 1,
+    width: "100%",
     justifyContent: "flex-end",
   },
-  keyboardAvoid: { width: "100%" },
   modal: {
     backgroundColor: "#FFFFFF",
     borderTopLeftRadius: 28,

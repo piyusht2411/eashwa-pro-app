@@ -18,6 +18,11 @@ export interface Container {
   quantity: number;
   date: string;
   ratePerUnit: number;
+  penaltyPerUnit: number;
+  // Server-computed live penalty figures
+  verifiedQuantity?: number;
+  pendingQuantity?: number;
+  totalPenalty?: number;
   assignedTeam: string | { _id: string; name: string; email: string };
   status: "active" | "completed" | "cancelled";
   createdBy: string | { _id: string; name: string; email: string };
@@ -27,7 +32,7 @@ export interface Container {
 
 export interface ProductionLog {
   _id: string;
-  container: string | { _id: string; model?: string };
+  container: string | { _id: string; model?: string; penaltyPerUnit?: number; quantity?: number; ratePerUnit?: number };
   team: string | { _id: string; name: string; email?: string };
   date: string;
   reportedQuantity: number;
@@ -39,8 +44,8 @@ export interface ProductionLog {
 
 export interface PDIVerification {
   _id: string;
-  productionLog: string | { _id: string };
-  container: string | { _id: string; model?: string };
+  productionLog: string | { _id: string; date?: string; reportedQuantity?: number };
+  container: string | { _id: string; model?: string; penaltyPerUnit?: number; quantity?: number };
   verifiedBy?: string;
   verifiedQuantity: number;
   isIncomplete: boolean;
@@ -85,6 +90,8 @@ interface ProductionState {
   productionLogs: ProductionLog[];
   pdiVerifications: PDIVerification[];
   pdiPendingCount: number;
+  pdiTotalPenalty: number;
+  pdiTotalPendingVehicles: number;
   payments: Payment[];
   containersPagination: API.PaginationMeta;
   teamsPagination: API.PaginationMeta;
@@ -126,12 +133,25 @@ interface ProductionState {
     quantity: number,
     date: string,
     ratePerUnit: number,
+    penaltyPerUnit: number,
     assignedTeamId: string,
     authToken: string,
   ) => Promise<void>;
   updateContainerStatus: (
     containerId: string,
     status: string,
+    authToken: string,
+  ) => Promise<void>;
+  updateContainer: (
+    containerId: string,
+    data: Partial<{
+      model: string;
+      quantity: number;
+      date: string;
+      ratePerUnit: number;
+      penaltyPerUnit: number;
+      status: string;
+    }>,
     authToken: string,
   ) => Promise<void>;
 
@@ -157,6 +177,7 @@ interface ProductionState {
     remarks?: string,
     authToken?: string,
   ) => Promise<void>;
+  unverifyProductionLog: (logId: string, authToken: string) => Promise<void>;
   fetchVerificationsByContainer: (
     containerId: string,
     authToken: string,
@@ -184,6 +205,8 @@ export const useProductionStore = create<ProductionState>()((set, get) => ({
   productionLogs: [],
   pdiVerifications: [],
   pdiPendingCount: 0,
+  pdiTotalPenalty: 0,
+  pdiTotalPendingVehicles: 0,
   payments: [],
   containersPagination: emptyPagination,
   teamsPagination: emptyPagination,
@@ -311,17 +334,35 @@ export const useProductionStore = create<ProductionState>()((set, get) => ({
     quantity,
     date,
     ratePerUnit,
+    penaltyPerUnit,
     assignedTeamId,
     authToken,
   ) => {
     set({ loading: true, error: null });
     try {
       const response = await API.createContainer(
-        { model, quantity, date, ratePerUnit, assignedTeam: assignedTeamId },
+        { model, quantity, date, ratePerUnit, penaltyPerUnit, assignedTeam: assignedTeamId },
         authToken,
       );
       set((state) => ({
         containers: [response.container as any, ...state.containers],
+        loading: false,
+      }));
+    } catch (error: any) {
+      set({ loading: false, error: error.message });
+      throw error;
+    }
+  },
+
+  // Update container fields (penalty / core fields) — admin only
+  updateContainer: async (containerId, data, authToken) => {
+    set({ loading: true, error: null });
+    try {
+      const response = await API.updateContainer(containerId, data, authToken);
+      set((state) => ({
+        containers: state.containers.map((c) =>
+          c._id === containerId ? (response.container as any) : c,
+        ),
         loading: false,
       }));
     } catch (error: any) {
@@ -429,6 +470,8 @@ export const useProductionStore = create<ProductionState>()((set, get) => ({
       const response = await API.getPDIDashboard(authToken, { page, limit: PAGE_SIZE });
       set((state) => ({
         pdiPendingCount: response.pendingCount ?? 0,
+        pdiTotalPenalty: response.totalPenalty ?? 0,
+        pdiTotalPendingVehicles: response.totalPendingVehicles ?? 0,
         pdiVerifications:
           page === 1
             ? (response.recentVerifications as any)
@@ -462,6 +505,30 @@ export const useProductionStore = create<ProductionState>()((set, get) => ({
           response.verification as any,
           ...state.pdiVerifications,
         ],
+        loading: false,
+      }));
+    } catch (error: any) {
+      set({ loading: false, error: error.message });
+      throw error;
+    }
+  },
+
+  // Unverify a production log — revert to pending (PDI only)
+  unverifyProductionLog: async (logId, authToken) => {
+    set({ loading: true, error: null });
+    try {
+      await API.unverifyProductionLog(logId, authToken);
+      set((state) => ({
+        // Drop any verification tied to this log
+        pdiVerifications: state.pdiVerifications.filter((v) => {
+          const vLogId =
+            typeof v.productionLog === "string" ? v.productionLog : v.productionLog._id;
+          return vLogId !== logId;
+        }),
+        // Reflect the log back to pending locally
+        productionLogs: state.productionLogs.map((l) =>
+          l._id === logId ? { ...l, status: "pending", verifiedQuantity: null } : l,
+        ),
         loading: false,
       }));
     } catch (error: any) {

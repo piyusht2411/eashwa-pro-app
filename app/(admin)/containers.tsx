@@ -1,7 +1,8 @@
 import { useAuthStore } from "@/stores/authStore";
 import { isNearScrollBottom } from "@/lib/scrollPagination";
 import { Container, PDIVerification, ProductionLog, Team, useProductionStore } from "@/stores/productionStore";
-import { Package, Plus, X } from "lucide-react-native";
+import { GradientHeader } from "@/components/ui/GradientHeader";
+import { Package, PackageSearch, Pencil, Plus, X } from "lucide-react-native";
 import { useEffect, useState } from "react";
 import {
   ActivityIndicator,
@@ -35,23 +36,20 @@ const getReportedForContainer = (logs: ProductionLog[], containerId: string) =>
     .filter((log) => getContainerId(log.container) === containerId)
     .reduce((sum, log) => sum + log.reportedQuantity, 0);
 
-const formatDateTime = (value: string) => {
+const formatDateOnly = (value: string) => {
   const date = new Date(value);
   if (Number.isNaN(date.getTime())) return value;
 
-  return date.toLocaleString("en-IN", {
+  return date.toLocaleDateString("en-IN", {
     day: "2-digit",
     month: "short",
     year: "numeric",
-    hour: "numeric",
-    minute: "2-digit",
-    hour12: true,
   });
 };
 
 export default function AdminContainers() {
   const insets = useSafeAreaInsets();
-  const { containers, containersPagination, pdiVerifications, productionLogs, teams, fetchContainers, fetchTeams, createContainer } =
+  const { containers, containersPagination, pdiVerifications, productionLogs, teams, fetchContainers, fetchTeams, createContainer, updateContainer } =
     useProductionStore();
   const { token } = useAuthStore();
   const productionTeams = teams.filter((team) => team.role === "team");
@@ -61,12 +59,18 @@ export default function AdminContainers() {
     model: "",
     quantity: "",
     ratePerUnit: "",
+    penaltyPerUnit: "",
     assignedTeamId: firstTeam?._id ?? "",
     date: new Date().toISOString().split("T")[0],
   });
   const [refreshing, setRefreshing] = useState(false);
   const [loadingMore, setLoadingMore] = useState(false);
   const [submitting, setSubmitting] = useState(false);
+
+  // Edit penalty state
+  const [penaltyTarget, setPenaltyTarget] = useState<Container | null>(null);
+  const [penaltyValue, setPenaltyValue] = useState("");
+  const [penaltySubmitting, setPenaltySubmitting] = useState(false);
 
   useEffect(() => {
     if (!token) return;
@@ -124,6 +128,7 @@ export default function AdminContainers() {
         Number(form.quantity),
         form.date,
         Number(form.ratePerUnit),
+        Number(form.penaltyPerUnit) || 0,
         form.assignedTeamId,
         token,
       );
@@ -132,6 +137,7 @@ export default function AdminContainers() {
         model: "",
         quantity: "",
         ratePerUnit: "",
+        penaltyPerUnit: "",
         assignedTeamId: firstTeam?._id ?? "",
         date: new Date().toISOString().split("T")[0],
       });
@@ -143,18 +149,55 @@ export default function AdminContainers() {
     }
   };
 
+  const openPenaltyEdit = (container: Container) => {
+    setPenaltyTarget(container);
+    setPenaltyValue(String(container.penaltyPerUnit ?? 0));
+  };
+
+  const closePenaltyEdit = () => {
+    setPenaltyTarget(null);
+    setPenaltyValue("");
+  };
+
+  const handleSavePenalty = async () => {
+    if (penaltySubmitting || !penaltyTarget) return;
+    const value = Number(penaltyValue);
+    if (penaltyValue === "" || Number.isNaN(value) || value < 0) {
+      Alert.alert("Error", "Enter a valid hold amount (0 or more)");
+      return;
+    }
+    if (!token) {
+      Alert.alert("Error", "Not authenticated");
+      return;
+    }
+    try {
+      setPenaltySubmitting(true);
+      await updateContainer(penaltyTarget._id, { penaltyPerUnit: value }, token);
+      closePenaltyEdit();
+      Alert.alert("Updated", "Hold per vehicle updated");
+    } catch (error: any) {
+      Alert.alert("Error", error.message || "Failed to update hold");
+    } finally {
+      setPenaltySubmitting(false);
+    }
+  };
+
   const statusColors: Record<string, string> = { active: "#059669", completed: "#F97316", cancelled: "#DC2626" };
   const statusBg: Record<string, string> = { active: "#F0FDF4", completed: "#FFF7ED", cancelled: "#FEF2F2" };
 
   return (
-    <SafeAreaView style={s.safe}>
-      <View style={s.header}>
-        <Text style={s.title}>Jobs / Containers</Text>
-        <Pressable onPress={() => setShowModal(true)} style={s.addBtn}>
-          <Plus color="#fff" size={18} />
-          <Text style={s.addBtnText}>Assign Job</Text>
-        </Pressable>
-      </View>
+    <View style={s.safe}>
+      <GradientHeader
+        title="Containers"
+        subtitle="Assign and track production jobs"
+        leftIcon={<PackageSearch color="#fff" size={20} />}
+        right={
+          <Pressable onPress={() => setShowModal(true)} style={s.addBtn}>
+            <Plus color="#fff" size={16} />
+            <Text style={s.addBtnText}>Assign</Text>
+          </Pressable>
+        }
+      />
 
       <ScrollView
         showsVerticalScrollIndicator={false}
@@ -167,11 +210,14 @@ export default function AdminContainers() {
         }
       >
         {containers.map((container) => {
-          const verified = getVerifiedForContainer(pdiVerifications, container._id);
+          const verified = container.verifiedQuantity ?? getVerifiedForContainer(pdiVerifications, container._id);
           const reported = getReportedForContainer(productionLogs, container._id);
           const progress =
             container.quantity > 0 ? Math.min((verified / container.quantity) * 100, 100) : 0;
           const statusColor = statusColors[container.status] ?? "#64748B";
+          const penaltyPerUnit = container.penaltyPerUnit ?? 0;
+          const pending = container.pendingQuantity ?? Math.max(0, container.quantity - verified);
+          const totalPenalty = container.totalPenalty ?? pending * penaltyPerUnit;
           return (
             <View key={container._id} style={s.card}>
               <View style={s.cardTop}>
@@ -181,7 +227,7 @@ export default function AdminContainers() {
                 <View style={s.cardInfo}>
                   <Text style={s.cardModel}>{container.model}</Text>
                   <Text style={s.cardMeta}>
-                    {getTeamName(container)} - {formatDateTime(container.date)}
+                    {getTeamName(container)} - {formatDateOnly(container.date)}
                   </Text>
                 </View>
                 <View style={[s.badge, { backgroundColor: statusBg[container.status] ?? "#F1F5F9" }]}>
@@ -201,6 +247,18 @@ export default function AdminContainers() {
                 <View style={s.stat}><Text style={s.statLbl}>Reported</Text><Text style={[s.statVal, { color: "#D97706" }]}>{reported}</Text></View>
                 <View style={s.stat}><Text style={s.statLbl}>Verified</Text><Text style={[s.statVal, { color: "#059669" }]}>{verified}</Text></View>
                 <View style={s.stat}><Text style={s.statLbl}>Rate</Text><Text style={[s.statVal, { color: "#F97316" }]}>Rs {container.ratePerUnit}</Text></View>
+              </View>
+
+              {/* Penalty section */}
+              <View style={s.penaltyBox}>
+                <View style={s.penaltyRow}>
+                  <View style={s.stat}><Text style={s.statLbl}>Pending</Text><Text style={[s.statVal, { color: "#DC2626" }]}>{pending}</Text></View>
+                  <View style={s.stat}><Text style={s.statLbl}>Hold / Vehicle</Text><Text style={[s.statVal, { color: "#DC2626" }]}>Rs {penaltyPerUnit}</Text></View>
+                  <View style={s.stat}><Text style={s.statLbl}>Total Hold</Text><Text style={[s.statVal, { color: "#DC2626" }]}>Rs {totalPenalty}</Text></View>
+                  <Pressable onPress={() => openPenaltyEdit(container)} style={s.penaltyEditBtn} hitSlop={8}>
+                    <Pencil color="#DC2626" size={14} />
+                  </Pressable>
+                </View>
               </View>
             </View>
           );
@@ -231,6 +289,7 @@ export default function AdminContainers() {
                   { label: "Scooter Model", key: "model", placeholder: "e.g. Ola S1 Pro" },
                   { label: "Target Quantity", key: "quantity", placeholder: "e.g. 100", keyboard: "numeric" as const },
                   { label: "Rate per Unit (Rs)", key: "ratePerUnit", placeholder: "e.g. 250", keyboard: "numeric" as const },
+                  { label: "Hold per Pending Vehicle (Rs)", key: "penaltyPerUnit", placeholder: "e.g. 100", keyboard: "numeric" as const },
                   { label: "Date", key: "date", placeholder: "YYYY-MM-DD" },
                 ].map((field) => (
                   <View key={field.key} style={s.fieldWrap}>
@@ -284,7 +343,53 @@ export default function AdminContainers() {
           </KeyboardAvoidingView>
         </View>
       </Modal>
-    </SafeAreaView>
+
+      {/* Edit penalty modal */}
+      <Modal visible={!!penaltyTarget} transparent animationType="slide" onRequestClose={closePenaltyEdit}>
+        <View style={s.overlay}>
+          <KeyboardAvoidingView behavior={Platform.OS === "ios" ? "padding" : "height"} style={s.keyboardAvoid}>
+            <View style={s.modal}>
+              <View style={s.modalHeader}>
+                <Text style={s.modalTitle}>Edit Hold</Text>
+                <Pressable onPress={closePenaltyEdit}>
+                  <X color="#94A3B8" size={22} />
+                </Pressable>
+              </View>
+              {penaltyTarget && (
+                <>
+                  <Text style={s.penaltyHint}>
+                    {penaltyTarget.model} — hold charged per pending (undelivered) vehicle.
+                  </Text>
+                  <View style={s.fieldWrap}>
+                    <Text style={s.fieldLabel}>Hold per Pending Vehicle (Rs)</Text>
+                    <TextInput
+                      style={s.fieldInput}
+                      value={penaltyValue}
+                      onChangeText={setPenaltyValue}
+                      placeholder="e.g. 100"
+                      placeholderTextColor="#CBD5E1"
+                      keyboardType="numeric"
+                      editable={!penaltySubmitting}
+                    />
+                  </View>
+                  <Pressable
+                    onPress={handleSavePenalty}
+                    disabled={penaltySubmitting}
+                    style={[s.createBtn, penaltySubmitting && s.createBtnDisabled]}
+                  >
+                    {penaltySubmitting ? (
+                      <ActivityIndicator color="#fff" />
+                    ) : (
+                      <Text style={s.createBtnText}>Save Hold</Text>
+                    )}
+                  </Pressable>
+                </>
+              )}
+            </View>
+          </KeyboardAvoidingView>
+        </View>
+      </Modal>
+    </View>
   );
 }
 
@@ -292,7 +397,7 @@ const s = StyleSheet.create({
   safe: { flex: 1, backgroundColor: "#F8FAFC" },
   header: { flexDirection: "row", justifyContent: "space-between", alignItems: "center", paddingHorizontal: 20, paddingTop: 20, paddingBottom: 16 },
   title: { fontSize: 20, fontWeight: "800", color: "#0F172A" },
-  addBtn: { flexDirection: "row", alignItems: "center", gap: 6, backgroundColor: "#F97316", borderRadius: 12, paddingHorizontal: 14, paddingVertical: 9 },
+  addBtn: { flexDirection: "row", alignItems: "center", gap: 5, backgroundColor: "rgba(255,255,255,0.22)", borderRadius: 10, paddingHorizontal: 12, paddingVertical: 8 },
   addBtnText: { color: "#fff", fontWeight: "700", fontSize: 13 },
   card: { marginHorizontal: 20, marginBottom: 12, backgroundColor: "#FFFFFF", borderRadius: 16, borderWidth: 1, borderColor: "#E2E8F0", padding: 16 },
   cardTop: { flexDirection: "row", alignItems: "center", marginBottom: 12, gap: 12 },
@@ -309,6 +414,10 @@ const s = StyleSheet.create({
   stat: { alignItems: "center" },
   statLbl: { fontSize: 10, color: "#94A3B8", marginBottom: 2 },
   statVal: { fontSize: 14, fontWeight: "700", color: "#0F172A" },
+  penaltyBox: { marginTop: 12, paddingTop: 12, borderTopWidth: 1, borderTopColor: "#FEE2E2" },
+  penaltyRow: { flexDirection: "row", justifyContent: "space-between", alignItems: "center" },
+  penaltyEditBtn: { width: 32, height: 32, borderRadius: 8, backgroundColor: "#FEF2F2", alignItems: "center", justifyContent: "center", borderWidth: 1, borderColor: "#FECACA" },
+  penaltyHint: { fontSize: 13, color: "#64748B", marginBottom: 14 },
   overlay: { flex: 1, backgroundColor: "#00000080", justifyContent: "flex-end" },
   keyboardAvoid: { width: "100%" },
   modal: { backgroundColor: "#FFFFFF", borderTopLeftRadius: 28, borderTopRightRadius: 28, padding: 24, borderTopWidth: 1, borderColor: "#E2E8F0", maxHeight: "90%" },

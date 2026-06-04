@@ -1,11 +1,12 @@
 import { Card } from "@/components/ui/Card";
 import { isNearScrollBottom } from "@/lib/scrollPagination";
 import { colors, fonts, radius, shadow } from "@/lib/theme";
+import { formatDateOnly } from "@/lib/utils";
 import { useAuthStore } from "@/stores/authStore";
 import { Container, PDIVerification, Payment, ProductionLog, useProductionStore } from "@/stores/productionStore";
 import { LinearGradient } from "expo-linear-gradient";
 import { router } from "expo-router";
-import { CheckCircle, Clock, LogOut, Package, TrendingUp } from "lucide-react-native";
+import { Bell, CheckCircle, Clock, Package, TrendingUp } from "lucide-react-native";
 import { useCallback, useEffect, useState } from "react";
 import {
   ActivityIndicator,
@@ -40,7 +41,7 @@ const getPaymentTeamId = (payment: Payment) =>
   typeof payment.team === "string" ? payment.team : payment.team._id;
 
 export default function TeamDashboard() {
-  const { user, token, logout } = useAuthStore();
+  const { user, token } = useAuthStore();
   const {
     containers,
     containersPagination,
@@ -76,10 +77,7 @@ export default function TeamDashboard() {
   const totalEarned = myPayment.reduce((sum, p) => sum + p.totalAmount, 0);
   const totalPaid = myPayment.reduce((sum, p) => sum + p.paidAmount, 0);
 
-  const handleLogout = async () => {
-    await logout();
-    router.replace("/(auth)/login");
-  };
+  const goToNotifications = () => router.push("/(team)/notifications" as any);
 
   const handleRefresh = async () => {
     if (!token) return;
@@ -106,6 +104,14 @@ export default function TeamDashboard() {
   };
 
   const stats = [
+    {
+      label: "Total Production",
+      value: String(totalVerified),
+      color: colors.primary,
+      bg: colors.primarySofter,
+      ring: colors.primaryBorder,
+      icon: TrendingUp,
+    },
     {
       label: "Active Containers",
       value: String(myContainers.filter((c) => c.status === "active").length),
@@ -167,8 +173,8 @@ export default function TeamDashboard() {
                 <Text style={s.roleBadgeText}>PRODUCTION TEAM</Text>
               </View>
             </View>
-            <Pressable onPress={handleLogout} style={s.logoutBtn} hitSlop={8}>
-              <LogOut color={colors.white} size={20} />
+            <Pressable onPress={goToNotifications} style={s.logoutBtn} hitSlop={8}>
+              <Bell color={colors.white} size={20} />
             </Pressable>
           </View>
 
@@ -217,7 +223,7 @@ export default function TeamDashboard() {
                     <View style={{ flex: 1, paddingRight: 8 }}>
                       <Text style={s.cardModel}>{container.model}</Text>
                       <Text style={s.cardDate}>
-                        {container.date} · ₹{container.ratePerUnit}/unit
+                        {formatDateOnly(container.date)} · ₹{container.ratePerUnit}/unit
                       </Text>
                     </View>
                     <View style={[s.badge, { backgroundColor: color + "18", borderColor: color + "40" }]}>
@@ -248,7 +254,7 @@ export default function TeamDashboard() {
                         const isVerified = !!verification;
                         return (
                           <View key={log._id} style={s.logRow}>
-                            <Text style={s.logDate}>{log.date}</Text>
+                            <Text style={s.logDate}>{formatDateOnly(log.date)}</Text>
                             <Text style={s.logQty}>{log.reportedQuantity} units</Text>
                             <View
                               style={[

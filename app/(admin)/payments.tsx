@@ -1,6 +1,7 @@
 import { useAuthStore } from "@/stores/authStore";
 import { isNearScrollBottom } from "@/lib/scrollPagination";
 import { Container, Payment, useProductionStore } from "@/stores/productionStore";
+import { GradientHeader } from "@/components/ui/GradientHeader";
 import { CheckCircle, Clock, CreditCard, X } from "lucide-react-native";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import {
@@ -191,14 +192,16 @@ export default function AdminPayments() {
   };
 
   return (
-    <SafeAreaView style={s.safe}>
-      <View style={s.header}>
-        <Text style={s.title}>Payments</Text>
-      </View>
+    <View style={s.safe}>
+      <GradientHeader
+        title="Payments"
+        subtitle="Track and record team payouts"
+        leftIcon={<CreditCard color="#fff" size={20} />}
+      />
 
       <View style={s.summaryBanner}>
         <View style={s.summaryItem}>
-          <Text style={s.summaryLabel}>Total Earned</Text>
+          <Text style={s.summaryLabel}>Total Amount to Pay</Text>
           <Text style={[s.summaryValue, { color: "#F97316" }]}>
             Rs {paymentItems.reduce((sum, p) => sum + p.totalAmount, 0).toLocaleString()}
           </Text>
@@ -348,6 +351,7 @@ export default function AdminPayments() {
                         placeholder="Enter amount"
                         placeholderTextColor="#CBD5E1"
                         keyboardType="numeric"
+                        returnKeyType="done"
                         editable={!submitting}
                       />
                     </View>
@@ -375,12 +379,13 @@ export default function AdminPayments() {
                     </Pressable>
                   </>
                 )}
+                <View style={{ height: insets.bottom + 80 }} />
               </ScrollView>
             </View>
           </KeyboardAvoidingView>
         </View>
       </Modal>
-    </SafeAreaView>
+    </View>
   );
 }
 
@@ -388,7 +393,7 @@ const s = StyleSheet.create({
   safe: { flex: 1, backgroundColor: "#F8FAFC" },
   header: { paddingHorizontal: 20, paddingTop: 20, paddingBottom: 12 },
   title: { fontSize: 20, fontWeight: "800", color: "#0F172A" },
-  summaryBanner: { flexDirection: "row", marginHorizontal: 20, marginBottom: 16, backgroundColor: "#FFFFFF", borderRadius: 16, borderWidth: 1, borderColor: "#E2E8F0", padding: 16 },
+  summaryBanner: { flexDirection: "row", marginHorizontal: 20, marginTop: 16, marginBottom: 16, backgroundColor: "#FFFFFF", borderRadius: 16, borderWidth: 1, borderColor: "#E2E8F0", padding: 16 },
   summaryItem: { flex: 1, alignItems: "center" },
   summaryLabel: { fontSize: 10, color: "#94A3B8", marginBottom: 4 },
   summaryValue: { fontSize: 16, fontWeight: "800" },

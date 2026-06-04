@@ -1,5 +1,10 @@
 import { Tabs } from 'expo-router';
-import { CreditCard, Home, PackageSearch, Users } from 'lucide-react-native';
+import {
+  CreditCard,
+  Home,
+  MoreHorizontal,
+  PackageSearch,
+} from 'lucide-react-native';
 import { Platform, StyleSheet } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
@@ -23,10 +28,17 @@ export default function AdminLayout() {
         tabBarLabelStyle: s.tabLabel,
       }}
     >
+      {/* Visible tabs */}
       <Tabs.Screen name="dashboard" options={{ title: 'Dashboard', tabBarIcon: ({ color, size }) => <Home color={color} size={size} strokeWidth={2.2} /> }} />
       <Tabs.Screen name="containers" options={{ title: 'Containers', tabBarIcon: ({ color, size }) => <PackageSearch color={color} size={size} strokeWidth={2.2} /> }} />
       <Tabs.Screen name="payments" options={{ title: 'Payments', tabBarIcon: ({ color, size }) => <CreditCard color={color} size={size} strokeWidth={2.2} /> }} />
-      <Tabs.Screen name="teams" options={{ title: 'Teams', tabBarIcon: ({ color, size }) => <Users color={color} size={size} strokeWidth={2.2} /> }} />
+      <Tabs.Screen name="more" options={{ title: 'More', tabBarIcon: ({ color, size }) => <MoreHorizontal color={color} size={size} strokeWidth={2.2} /> }} />
+
+      {/* Routable but hidden from tab bar — reached via More */}
+      <Tabs.Screen name="monitor" options={{ href: null }} />
+      <Tabs.Screen name="report" options={{ href: null }} />
+      <Tabs.Screen name="teams" options={{ href: null }} />
+      <Tabs.Screen name="notifications" options={{ href: null }} />
     </Tabs>
   );
 }

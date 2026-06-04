@@ -1,5 +1,10 @@
 import { Tabs } from 'expo-router';
-import { ClipboardList, Home, IndianRupee } from 'lucide-react-native';
+import {
+  ClipboardList,
+  Home,
+  IndianRupee,
+  MoreHorizontal,
+} from 'lucide-react-native';
 import { Platform, StyleSheet } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
@@ -23,9 +28,15 @@ export default function TeamLayout() {
         tabBarLabelStyle: s.tabLabel,
       }}
     >
+      {/* Visible tabs */}
       <Tabs.Screen name="dashboard" options={{ title: 'My Work', tabBarIcon: ({ color, size }) => <Home color={color} size={size} strokeWidth={2.2} /> }} />
       <Tabs.Screen name="log-production" options={{ title: 'Log', tabBarIcon: ({ color, size }) => <ClipboardList color={color} size={size} strokeWidth={2.2} /> }} />
       <Tabs.Screen name="earnings" options={{ title: 'Earnings', tabBarIcon: ({ color, size }) => <IndianRupee color={color} size={size} strokeWidth={2.2} /> }} />
+      <Tabs.Screen name="more" options={{ title: 'More', tabBarIcon: ({ color, size }) => <MoreHorizontal color={color} size={size} strokeWidth={2.2} /> }} />
+
+      {/* Hidden — reached via More */}
+      <Tabs.Screen name="history" options={{ href: null }} />
+      <Tabs.Screen name="notifications" options={{ href: null }} />
     </Tabs>
   );
 }

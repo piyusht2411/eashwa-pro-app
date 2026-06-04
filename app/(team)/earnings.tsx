@@ -1,6 +1,7 @@
 import { useAuthStore } from "@/stores/authStore";
 import { isNearScrollBottom } from "@/lib/scrollPagination";
 import { Container, Payment, ProductionLog, useProductionStore } from "@/stores/productionStore";
+import { GradientHeader } from "@/components/ui/GradientHeader";
 import { CheckCircle, Clock, IndianRupee, TrendingUp } from "lucide-react-native";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { ActivityIndicator, Alert, RefreshControl, ScrollView, StyleSheet, Text, View } from "react-native";
@@ -127,19 +128,21 @@ export default function TeamEarnings() {
   };
 
   return (
-    <SafeAreaView style={s.safe}>
+    <View style={s.safe}>
+      <GradientHeader
+        title="My Earnings"
+        subtitle="Track your verified output and payouts"
+        leftIcon={<IndianRupee color="#fff" size={20} />}
+      />
       <ScrollView
         showsVerticalScrollIndicator={false}
         onScroll={({ nativeEvent }) => {
           if (isNearScrollBottom(nativeEvent)) handleLoadMore();
         }}
         scrollEventThrottle={400}
+        contentContainerStyle={{ paddingTop: 16 }}
         refreshControl={<RefreshControl refreshing={refreshing} onRefresh={handleRefresh} tintColor="#F97316" />}
       >
-        <View style={s.header}>
-          <IndianRupee color="#F97316" size={24} />
-          <Text style={s.title}>My Earnings</Text>
-        </View>
 
         <View style={s.statsGrid}>
           {[
@@ -206,7 +209,7 @@ export default function TeamEarnings() {
         {loadingMore && <ActivityIndicator color="#F97316" style={{ marginVertical: 16 }} />}
         <View style={{ height: 24 }} />
       </ScrollView>
-    </SafeAreaView>
+    </View>
   );
 }
 

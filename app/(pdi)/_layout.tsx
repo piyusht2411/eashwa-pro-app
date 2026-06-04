@@ -1,5 +1,5 @@
 import { Tabs } from 'expo-router';
-import { ClipboardCheck, LayoutDashboard } from 'lucide-react-native';
+import { ClipboardCheck, LayoutDashboard, MoreHorizontal } from 'lucide-react-native';
 import { Platform, StyleSheet } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
@@ -23,8 +23,13 @@ export default function PdiLayout() {
         tabBarLabelStyle: s.tabLabel,
       }}
     >
+      {/* Visible tabs */}
       <Tabs.Screen name="dashboard" options={{ title: 'Overview', tabBarIcon: ({ color, size }) => <LayoutDashboard color={color} size={size} strokeWidth={2.2} /> }} />
       <Tabs.Screen name="verify" options={{ title: 'Verify', tabBarIcon: ({ color, size }) => <ClipboardCheck color={color} size={size} strokeWidth={2.2} /> }} />
+      <Tabs.Screen name="more" options={{ title: 'More', tabBarIcon: ({ color, size }) => <MoreHorizontal color={color} size={size} strokeWidth={2.2} /> }} />
+
+      {/* Hidden — reached via More */}
+      <Tabs.Screen name="notifications" options={{ href: null }} />
     </Tabs>
   );
 }
