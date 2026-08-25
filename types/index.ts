@@ -1,10 +1,14 @@
-export type UserRole = 'admin' | 'team' | 'pdi';
+export type Portal = 'production' | 'transport';
+export type UserRole = 'admin' | 'team' | 'pdi' | 'accounts' | 'driver';
 export type TeamType = 'production' | 'pdi';
 
 export interface AppUser {
   _id: string;
   name: string;
   role: UserRole;
+  portal?: Portal;
+  email?: string;
+  phone?: string;
   teamId?: string;
   teamName?: string;
 }
@@ -80,4 +84,131 @@ export interface ContainerPayment {
   paidAmount: number;
   remainingAmount: number;
   payments: PaymentEntry[];
+}
+
+// ─── Transport Specific Types ──────────────────────────────────────────
+export type PaidBy = 'driver' | 'company';
+export type ExpenseStatus = 'pending' | 'approved' | 'rejected' | 'auto_approved';
+
+export interface Driver {
+  _id: string;
+  name: string;
+  vehicleNumber: string;
+  userId: string | null;
+  isActive: boolean;
+  createdAt?: string;
+}
+
+export interface DriverSummary {
+  driver: Driver;
+  summary: {
+    totalVisits: number;
+    totalDistance: number;
+    totalExpense: number;
+    approvedReimbursement: number;
+    pendingReimbursement: number;
+    rejectedAmount: number;
+  };
+  recentVisits: Visit[];
+  pagination: PaginationMeta;
+}
+
+export interface Visit {
+  _id: string;
+  driver: Driver | string;
+  vehicleNumber: string;
+  destination: string;
+  startDate: string;
+  endDate: string;
+  totalDays: number;
+  quantity: number;
+  billNumber: string;
+  distance: number;
+  createdBy?: AppUser | string;
+  updatedBy?: AppUser | string;
+  createdAt?: string;
+  updatedAt?: string;
+}
+
+export interface ExpenseItem {
+  amount: number;
+  paidBy: PaidBy;
+  status: ExpenseStatus;
+  approvedBy?: { name: string } | null;
+  rejectedBy?: { name: string } | null;
+  rejectionRemark?: string;
+  approvedAt?: string | null;
+  description?: string;
+}
+
+export interface Expense {
+  _id: string;
+  visit: string;
+  driver: Driver | string;
+  food: ExpenseItem;
+  cng: ExpenseItem;
+  other: ExpenseItem & { description: string };
+  totalExpense: number;
+  pendingReimbursement: number;
+  approvedReimbursement: number;
+  rejectedAmount: number;
+  createdAt?: string;
+  updatedAt?: string;
+}
+
+export interface AdminDashboardStats {
+  totalDrivers: number;
+  totalVisits: number;
+  totalDistance: number;
+  totalExpense: number;
+  pendingReimbursements: number;
+  approvedReimbursements: number;
+  pendingApprovals: number;
+}
+
+export interface AdminDashboard {
+  stats: AdminDashboardStats;
+  recentVisits: Visit[];
+  recentPendingExpenses: Expense[];
+}
+
+export interface AccountsDashboard {
+  stats: {
+    totalDrivers: number;
+    totalVisits: number;
+    totalExpense: number;
+    pendingApprovals: number;
+  };
+  recentVisits: Visit[];
+}
+
+export interface DriverDashboard {
+  driver: Driver;
+  stats: {
+    totalVisits: number;
+    totalDistance: number;
+    totalExpense: number;
+    approvedReimbursements: number;
+    pendingBalance: number;
+  };
+  recentVisits: Visit[];
+}
+
+export interface AppNotification {
+  _id: string;
+  recipient: string;
+  type: string;
+  title: string;
+  body: string;
+  data: Record<string, string>;
+  isRead: boolean;
+  createdAt: string;
+}
+
+export interface PaginationMeta {
+  page: number;
+  limit: number;
+  total: number;
+  totalPages: number;
+  hasNextPage: boolean;
 }

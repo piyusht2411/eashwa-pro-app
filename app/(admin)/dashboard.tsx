@@ -12,6 +12,7 @@ import {
   Bell,
   ClipboardList,
   IndianRupee,
+  MinusCircle,
   Package,
   TrendingUp,
   Wallet,
@@ -138,6 +139,7 @@ export default function AdminDashboard() {
         { label: "Pending Verify", value: String(summary.pendingVerify), icon: ClipboardList, color: colors.warning, bg: colors.warningSoft, ring: colors.warningBorder },
         { label: "Total Amount", value: formatINR(summary.totalAmount), icon: IndianRupee, color: colors.primary, bg: colors.primarySofter, ring: colors.primaryBorder },
         { label: "Paid", value: formatINR(summary.paidAmount), icon: Wallet, color: colors.success, bg: colors.successSoft, ring: colors.successBorder },
+        { label: "Miscellaneous", value: formatINR(summary.miscellaneousAmount ?? 0), icon: MinusCircle, color: colors.warning, bg: colors.warningSoft, ring: colors.warningBorder },
         { label: "Remaining", value: formatINR(summary.remainingAmount), icon: Package, color: colors.danger, bg: colors.dangerSoft, ring: colors.dangerBorder },
         { label: "Total Hold", value: formatINR(summary.totalPenalty), icon: AlertCircle, color: colors.danger, bg: colors.dangerSoft, ring: colors.dangerBorder },
       ]

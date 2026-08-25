@@ -2,7 +2,7 @@ import { useAuthStore } from "@/stores/authStore";
 import { isNearScrollBottom } from "@/lib/scrollPagination";
 import { Container, PDIVerification, ProductionLog, Team, useProductionStore } from "@/stores/productionStore";
 import { GradientHeader } from "@/components/ui/GradientHeader";
-import { Package, PackageSearch, Pencil, Plus, X } from "lucide-react-native";
+import { Package, PackageSearch, Pencil, Plus, Trash2, X } from "lucide-react-native";
 import { useEffect, useState } from "react";
 import {
   ActivityIndicator,
@@ -49,7 +49,7 @@ const formatDateOnly = (value: string) => {
 
 export default function AdminContainers() {
   const insets = useSafeAreaInsets();
-  const { containers, containersPagination, pdiVerifications, productionLogs, teams, fetchContainers, fetchTeams, createContainer, updateContainer } =
+  const { containers, containersPagination, pdiVerifications, productionLogs, teams, fetchContainers, fetchTeams, createContainer, updateContainer, deleteContainer } =
     useProductionStore();
   const { token } = useAuthStore();
   const productionTeams = teams.filter((team) => team.role === "team");
@@ -71,6 +71,18 @@ export default function AdminContainers() {
   const [penaltyTarget, setPenaltyTarget] = useState<Container | null>(null);
   const [penaltyValue, setPenaltyValue] = useState("");
   const [penaltySubmitting, setPenaltySubmitting] = useState(false);
+
+  // Full edit container state
+  const [editTarget, setEditTarget] = useState<Container | null>(null);
+  const [editForm, setEditForm] = useState({
+    model: "",
+    quantity: "",
+    ratePerUnit: "",
+    date: "",
+    status: "active" as "active" | "completed" | "cancelled",
+  });
+  const [editSubmitting, setEditSubmitting] = useState(false);
+  const [deletingId, setDeletingId] = useState<string | null>(null);
 
   useEffect(() => {
     if (!token) return;
@@ -182,6 +194,81 @@ export default function AdminContainers() {
     }
   };
 
+  const openEdit = (container: Container) => {
+    setEditTarget(container);
+    setEditForm({
+      model: container.model,
+      quantity: String(container.quantity),
+      ratePerUnit: String(container.ratePerUnit),
+      date: new Date(container.date).toISOString().split("T")[0],
+      status: container.status,
+    });
+  };
+
+  const closeEdit = () => {
+    setEditTarget(null);
+  };
+
+  const handleSaveEdit = async () => {
+    if (editSubmitting || !editTarget || !token) return;
+    if (!editForm.model || !editForm.quantity || !editForm.ratePerUnit) {
+      Alert.alert("Error", "Model, quantity and rate are required");
+      return;
+    }
+    if (Number(editForm.quantity) < 1) {
+      Alert.alert("Error", "Target quantity must be at least 1");
+      return;
+    }
+    try {
+      setEditSubmitting(true);
+      await updateContainer(
+        editTarget._id,
+        {
+          model: editForm.model,
+          quantity: Number(editForm.quantity),
+          ratePerUnit: Number(editForm.ratePerUnit),
+          date: editForm.date,
+          status: editForm.status,
+        },
+        token,
+      );
+      closeEdit();
+      Alert.alert("Updated", "Container updated");
+    } catch (error: any) {
+      Alert.alert("Error", error.message || "Failed to update container");
+    } finally {
+      setEditSubmitting(false);
+    }
+  };
+
+  const handleDeleteContainer = (container: Container) => {
+    if (!token) return;
+    Alert.alert(
+      "Delete container?",
+      `Delete ${container.model}? This cannot be undone and also removes its production logs, verifications and payment ledger.`,
+      [
+        { text: "Cancel", style: "cancel" },
+        {
+          text: "Delete",
+          style: "destructive",
+          onPress: async () => {
+            if (!token) return;
+            setDeletingId(container._id);
+            try {
+              await deleteContainer(container._id, token);
+              if (editTarget?._id === container._id) closeEdit();
+              Alert.alert("Deleted", "Container removed");
+            } catch (error: any) {
+              Alert.alert("Error", error.message || "Failed to delete container");
+            } finally {
+              setDeletingId(null);
+            }
+          },
+        },
+      ],
+    );
+  };
+
   const statusColors: Record<string, string> = { active: "#059669", completed: "#F97316", cancelled: "#DC2626" };
   const statusBg: Record<string, string> = { active: "#F0FDF4", completed: "#FFF7ED", cancelled: "#FEF2F2" };
 
@@ -235,6 +322,21 @@ export default function AdminContainers() {
                     {container.status.toUpperCase()}
                   </Text>
                 </View>
+                <Pressable onPress={() => openEdit(container)} style={s.cardActionBtn} hitSlop={6}>
+                  <Pencil color="#475569" size={15} />
+                </Pressable>
+                <Pressable
+                  onPress={() => handleDeleteContainer(container)}
+                  disabled={deletingId === container._id}
+                  style={s.cardActionBtn}
+                  hitSlop={6}
+                >
+                  {deletingId === container._id ? (
+                    <ActivityIndicator color="#DC2626" size="small" />
+                  ) : (
+                    <Trash2 color="#DC2626" size={15} />
+                  )}
+                </Pressable>
               </View>
               <View style={s.progressBg}>
                 <View style={[s.progressFill, { width: `${progress}%` as any, backgroundColor: statusColor }]} />
@@ -356,7 +458,11 @@ export default function AdminContainers() {
                 </Pressable>
               </View>
               {penaltyTarget && (
-                <>
+                <ScrollView
+                  keyboardShouldPersistTaps="handled"
+                  showsVerticalScrollIndicator={false}
+                  contentContainerStyle={{ paddingBottom: Math.max(insets.bottom, 24) }}
+                >
                   <Text style={s.penaltyHint}>
                     {penaltyTarget.model} — hold charged per pending (undelivered) vehicle.
                   </Text>
@@ -383,8 +489,95 @@ export default function AdminContainers() {
                       <Text style={s.createBtnText}>Save Hold</Text>
                     )}
                   </Pressable>
-                </>
+                </ScrollView>
               )}
+            </View>
+          </KeyboardAvoidingView>
+        </View>
+      </Modal>
+
+      {/* Full edit container modal */}
+      <Modal visible={!!editTarget} transparent animationType="slide" onRequestClose={closeEdit}>
+        <View style={s.overlay}>
+          <KeyboardAvoidingView behavior={Platform.OS === "ios" ? "padding" : "height"} style={s.keyboardAvoid}>
+            <View style={s.modal}>
+              <ScrollView
+                keyboardShouldPersistTaps="handled"
+                showsVerticalScrollIndicator={false}
+                contentContainerStyle={{ paddingBottom: Math.max(insets.bottom, 24) }}
+              >
+                <View style={s.modalHeader}>
+                  <Text style={s.modalTitle}>Edit Container</Text>
+                  <Pressable onPress={closeEdit}>
+                    <X color="#94A3B8" size={22} />
+                  </Pressable>
+                </View>
+                {editTarget && (
+                  <>
+                    {[
+                      { label: "Scooter Model", key: "model", placeholder: "e.g. Ola S1 Pro" },
+                      { label: "Target Quantity", key: "quantity", placeholder: "e.g. 100", keyboard: "numeric" as const },
+                      { label: "Rate per Unit (Rs)", key: "ratePerUnit", placeholder: "e.g. 250", keyboard: "numeric" as const },
+                      { label: "Date", key: "date", placeholder: "YYYY-MM-DD" },
+                    ].map((field) => (
+                      <View key={field.key} style={s.fieldWrap}>
+                        <Text style={s.fieldLabel}>{field.label}</Text>
+                        <TextInput
+                          style={s.fieldInput}
+                          value={editForm[field.key as keyof typeof editForm]}
+                          onChangeText={(value) => setEditForm((prev) => ({ ...prev, [field.key]: value }))}
+                          placeholder={field.placeholder}
+                          placeholderTextColor="#CBD5E1"
+                          keyboardType={field.keyboard ?? "default"}
+                          editable={!editSubmitting}
+                        />
+                      </View>
+                    ))}
+                    <View style={s.fieldWrap}>
+                      <Text style={s.fieldLabel}>Status</Text>
+                      <View style={s.statusRow}>
+                        {(["active", "completed", "cancelled"] as const).map((st) => (
+                          <Pressable
+                            key={st}
+                            onPress={() => setEditForm((prev) => ({ ...prev, status: st }))}
+                            disabled={editSubmitting}
+                            style={[s.statusChip, editForm.status === st && s.statusChipActive]}
+                          >
+                            <Text style={[s.statusChipText, editForm.status === st && { color: "#F97316" }]}>
+                              {st.toUpperCase()}
+                            </Text>
+                          </Pressable>
+                        ))}
+                      </View>
+                    </View>
+                    <Pressable
+                      onPress={handleSaveEdit}
+                      disabled={editSubmitting}
+                      style={[s.createBtn, editSubmitting && s.createBtnDisabled]}
+                    >
+                      {editSubmitting ? (
+                        <ActivityIndicator color="#fff" />
+                      ) : (
+                        <Text style={s.createBtnText}>Save Changes</Text>
+                      )}
+                    </Pressable>
+                    <Pressable
+                      onPress={() => handleDeleteContainer(editTarget)}
+                      disabled={deletingId === editTarget._id}
+                      style={s.deleteContainerBtn}
+                    >
+                      {deletingId === editTarget._id ? (
+                        <ActivityIndicator color="#DC2626" />
+                      ) : (
+                        <>
+                          <Trash2 color="#DC2626" size={16} />
+                          <Text style={s.deleteContainerBtnText}>Delete Container</Text>
+                        </>
+                      )}
+                    </Pressable>
+                  </>
+                )}
+              </ScrollView>
             </View>
           </KeyboardAvoidingView>
         </View>
@@ -417,6 +610,13 @@ const s = StyleSheet.create({
   penaltyBox: { marginTop: 12, paddingTop: 12, borderTopWidth: 1, borderTopColor: "#FEE2E2" },
   penaltyRow: { flexDirection: "row", justifyContent: "space-between", alignItems: "center" },
   penaltyEditBtn: { width: 32, height: 32, borderRadius: 8, backgroundColor: "#FEF2F2", alignItems: "center", justifyContent: "center", borderWidth: 1, borderColor: "#FECACA" },
+  cardActionBtn: { width: 32, height: 32, borderRadius: 8, backgroundColor: "#F1F5F9", alignItems: "center", justifyContent: "center", borderWidth: 1, borderColor: "#E2E8F0", marginLeft: 6 },
+  statusRow: { flexDirection: "row", gap: 8 },
+  statusChip: { flex: 1, alignItems: "center", paddingVertical: 10, borderRadius: 10, backgroundColor: "#F8FAFC", borderWidth: 1, borderColor: "#E2E8F0" },
+  statusChipActive: { backgroundColor: "#FFF7ED", borderColor: "#F97316" },
+  statusChipText: { fontSize: 12, fontWeight: "700", color: "#64748B" },
+  deleteContainerBtn: { flexDirection: "row", alignItems: "center", justifyContent: "center", gap: 8, marginTop: 12, paddingVertical: 14, borderRadius: 14, backgroundColor: "#FEF2F2", borderWidth: 1, borderColor: "#FECACA" },
+  deleteContainerBtnText: { color: "#DC2626", fontWeight: "700", fontSize: 15 },
   penaltyHint: { fontSize: 13, color: "#64748B", marginBottom: 14 },
   overlay: { flex: 1, backgroundColor: "#00000080", justifyContent: "flex-end" },
   keyboardAvoid: { width: "100%" },

@@ -1,4 +1,14 @@
 // ─── API Configuration ─────────────────────────────────────────────────────
+import type {
+  AccountsDashboard,
+  AdminDashboard,
+  Driver,
+  DriverDashboard,
+  DriverSummary,
+  Expense,
+  Visit,
+} from "@/types";
+
 // Change this to your deployed backend URL when ready
 export const API_BASE = "https://eashwa-pro-backend.vercel.app/api";
 
@@ -24,7 +34,9 @@ const withPagination = (path: string, params: PaginationParams = {}) => {
   if (params.page) query.set("page", String(params.page));
   if (params.limit) query.set("limit", String(params.limit));
   const queryString = query.toString();
-  return queryString ? `${path}${path.includes("?") ? "&" : "?"}${queryString}` : path;
+  return queryString
+    ? `${path}${path.includes("?") ? "&" : "?"}${queryString}`
+    : path;
 };
 
 // ─── API Helper ────────────────────────────────────────────────────────────
@@ -68,7 +80,8 @@ export interface LoginResponse {
     _id: string;
     name: string;
     email: string;
-    role: "admin" | "team" | "pdi";
+    role: "admin" | "team" | "pdi" | "accounts" | "driver";
+    portal: "production" | "transport";
     phone?: string;
   };
 }
@@ -79,7 +92,8 @@ export interface RegisterResponse {
     _id: string;
     name: string;
     email: string;
-    role: "admin" | "team" | "pdi";
+    role: "admin" | "team" | "pdi" | "accounts" | "driver";
+    portal: "production" | "transport";
   };
 }
 
@@ -87,18 +101,21 @@ export interface UserResponse {
   _id: string;
   name: string;
   email: string;
-  role: "admin" | "team" | "pdi";
+  role: "admin" | "team" | "pdi" | "accounts" | "driver";
+  portal: "production" | "transport";
   phone?: string;
+  isActive?: boolean;
   createdAt: string;
   updatedAt: string;
 }
 
 export interface UpdateUserPayload {
-  name: string;
-  email: string;
-  phone: string;
-  role: "team" | "pdi";
+  name?: string;
+  email?: string;
+  phone?: string;
+  role?: "team" | "pdi" | "accounts" | "driver";
   password?: string;
+  isActive?: boolean;
 }
 
 export async function loginUser(
@@ -160,9 +177,20 @@ export async function updateFcmToken(
 
 export async function getAllUsers(
   authToken: string,
-  role?: "team" | "pdi" | "admin",
+  role?:
+    | "team"
+    | "pdi"
+    | "admin"
+    | { role?: string; search?: string; page?: number; limit?: number },
   params: PaginationParams = {},
 ): Promise<{ users: UserResponse[] } & PaginatedResponse> {
+  if (typeof role === "object") {
+    return apiFetch<{ users: UserResponse[] } & PaginatedResponse>(
+      `/users${transportQuery(role)}`,
+      {},
+      authToken,
+    );
+  }
   const query = role ? `?role=${role}` : "";
   return apiFetch<{ users: UserResponse[] } & PaginatedResponse>(
     withPagination(`/user/all${query}`, params),
@@ -183,8 +211,12 @@ export async function updateUser(
   data: UpdateUserPayload,
   authToken: string,
 ): Promise<{ message: string; user: UserResponse }> {
+  const isTransportUser =
+    data.isActive !== undefined ||
+    data.role === "accounts" ||
+    data.role === "driver";
   return apiFetch<{ message: string; user: UserResponse }>(
-    `/user/${id}`,
+    isTransportUser ? `/users/${id}` : `/user/${id}`,
     {
       method: "PATCH",
       body: JSON.stringify(data),
@@ -218,21 +250,21 @@ export interface ContainerResponse {
   pendingQuantity?: number;
   totalPenalty?: number;
   assignedTeam:
-  | {
-    _id: string;
-    name: string;
-    email: string;
-    phone?: string;
-  }
-  | string;
+    | {
+        _id: string;
+        name: string;
+        email: string;
+        phone?: string;
+      }
+    | string;
   status: "active" | "completed" | "cancelled";
   createdBy:
-  | {
-    _id: string;
-    name: string;
-    email: string;
-  }
-  | string;
+    | {
+        _id: string;
+        name: string;
+        email: string;
+      }
+    | string;
   createdAt: string;
   updatedAt: string;
 }
@@ -317,20 +349,31 @@ export async function updateContainerStatus(
   );
 }
 
+export async function deleteContainer(
+  id: string,
+  authToken: string,
+): Promise<{ message: string }> {
+  return apiFetch<{ message: string }>(
+    `/containers/${id}`,
+    { method: "DELETE" },
+    authToken,
+  );
+}
+
 // ─── Production Log API ──────────────────────────────────────────────────────
 
 export interface ProductionLogResponse {
   _id: string;
   container:
-  | string
-  | {
-    _id: string;
-    model: string;
-    quantity: number;
-    date: string;
-    ratePerUnit: number;
-    status: string;
-  };
+    | string
+    | {
+        _id: string;
+        model: string;
+        quantity: number;
+        date: string;
+        ratePerUnit: number;
+        status: string;
+      };
   team: string | { _id: string; name: string; email: string };
   date: string;
   reportedQuantity: number;
@@ -383,11 +426,13 @@ export async function getProductionLogsByContainer(
   containerId: string,
   authToken: string,
   params: PaginationParams = {},
-): Promise<{
-  logs: ProductionLogResponse[];
-  totalReported: number;
-  totalVerified: number;
-} & PaginatedResponse> {
+): Promise<
+  {
+    logs: ProductionLogResponse[];
+    totalReported: number;
+    totalVerified: number;
+  } & PaginatedResponse
+> {
   return apiFetch<any>(
     withPagination(`/production-logs/container/${containerId}`, params),
     {},
@@ -406,13 +451,39 @@ export async function getProductionLogById(
   );
 }
 
+export async function updateProductionLog(
+  logId: string,
+  data: Partial<{ reportedQuantity: number; date: string }>,
+  authToken: string,
+): Promise<{ message: string; log: ProductionLogResponse }> {
+  return apiFetch<{ message: string; log: ProductionLogResponse }>(
+    `/production-logs/${logId}`,
+    {
+      method: "PATCH",
+      body: JSON.stringify(data),
+    },
+    authToken,
+  );
+}
+
+export async function deleteProductionLog(
+  logId: string,
+  authToken: string,
+): Promise<{ message: string; logId: string }> {
+  return apiFetch<{ message: string; logId: string }>(
+    `/production-logs/${logId}`,
+    { method: "DELETE" },
+    authToken,
+  );
+}
+
 // ─── PDI Verification API ────────────────────────────────────────────────────
 
 export interface PDIVerificationResponse {
   _id: string;
   productionLog:
-  | string
-  | { _id: string; date: string; reportedQuantity: number };
+    | string
+    | { _id: string; date: string; reportedQuantity: number };
   container: string | { _id: string; model: string };
   verifiedBy?: {
     _id: string;
@@ -431,12 +502,14 @@ export interface PDIVerificationResponse {
 export async function getPDIDashboard(
   authToken: string,
   params: PaginationParams = {},
-): Promise<{
-  pendingCount: number;
-  totalPenalty: number;
-  totalPendingVehicles: number;
-  recentVerifications: any[];
-} & PaginatedResponse> {
+): Promise<
+  {
+    pendingCount: number;
+    totalPenalty: number;
+    totalPendingVehicles: number;
+    recentVerifications: any[];
+  } & PaginatedResponse
+> {
   return apiFetch<any>(withPagination("/pdi/dashboard", params), {}, authToken);
 }
 
@@ -482,11 +555,17 @@ export async function getPDIVerificationsByContainer(
   containerId: string,
   authToken: string,
   params: PaginationParams = {},
-): Promise<{
-  verifications: PDIVerificationResponse[];
-  totalVerified: number;
-} & PaginatedResponse> {
-  return apiFetch<any>(withPagination(`/pdi/container/${containerId}`, params), {}, authToken);
+): Promise<
+  {
+    verifications: PDIVerificationResponse[];
+    totalVerified: number;
+  } & PaginatedResponse
+> {
+  return apiFetch<any>(
+    withPagination(`/pdi/container/${containerId}`, params),
+    {},
+    authToken,
+  );
 }
 
 // ─── Payment API ─────────────────────────────────────────────────────────────
@@ -511,6 +590,10 @@ export interface PaymentResponse {
   totalAmount: number;
   paidAmount: number;
   remainingAmount: number;
+  // Live hold/penalty for the container (pending vehicles × hold per vehicle)
+  pendingQuantity?: number;
+  penaltyPerUnit?: number;
+  totalPenalty?: number;
   payments: Array<{
     amount: number;
     paidAt: string;
@@ -529,10 +612,15 @@ export async function getAllPayments(
   );
 }
 
-export async function getMyPayments(authToken: string, params: PaginationParams = {}): Promise<{
-  payments: PaymentResponse[];
-  summary: { totalEarned: number; totalPaid: number; totalRemaining: number };
-} & PaginatedResponse> {
+export async function getMyPayments(
+  authToken: string,
+  params: PaginationParams = {},
+): Promise<
+  {
+    payments: PaymentResponse[];
+    summary: { totalEarned: number; totalPaid: number; totalRemaining: number };
+  } & PaginatedResponse
+> {
   return apiFetch<any>(withPagination("/payments/my", params), {}, authToken);
 }
 
@@ -576,6 +664,102 @@ export async function recordPayment(
   );
 }
 
+// Edit a recorded payment transaction by its index in the ledger's payments[]
+export async function updatePaymentEntry(
+  containerId: string,
+  index: number,
+  data: { amount?: number; note?: string },
+  authToken: string,
+): Promise<{ message: string; payment: PaymentResponse }> {
+  return apiFetch<any>(
+    `/payments/container/${containerId}/pay/${index}`,
+    {
+      method: "PATCH",
+      body: JSON.stringify(data),
+    },
+    authToken,
+  );
+}
+
+// Delete a recorded payment transaction by its index in the ledger's payments[]
+export async function deletePaymentEntry(
+  containerId: string,
+  index: number,
+  authToken: string,
+): Promise<{ message: string; payment: PaymentResponse }> {
+  return apiFetch<any>(
+    `/payments/container/${containerId}/pay/${index}`,
+    { method: "DELETE" },
+    authToken,
+  );
+}
+
+// ─── Miscellaneous API ───────────────────────────────────────────────────────
+
+export interface MiscellaneousEntry {
+  _id: string;
+  amount: number;
+  note?: string;
+  createdBy?: { _id: string; name: string; email: string } | string;
+  createdAt: string;
+}
+
+export async function getMiscellaneous(
+  authToken: string,
+  params: PaginationParams = {},
+): Promise<
+  {
+    entries: MiscellaneousEntry[];
+    totalMiscellaneous: number;
+  } & PaginatedResponse
+> {
+  return apiFetch<any>(withPagination("/miscellaneous", params), {}, authToken);
+}
+
+export async function addMiscellaneous(
+  data: { amount: number; note?: string },
+  authToken: string,
+): Promise<{
+  message: string;
+  entry: MiscellaneousEntry;
+  totalMiscellaneous: number;
+}> {
+  return apiFetch<any>(
+    "/miscellaneous",
+    {
+      method: "POST",
+      body: JSON.stringify(data),
+    },
+    authToken,
+  );
+}
+
+export async function updateMiscellaneous(
+  id: string,
+  data: { amount?: number; note?: string },
+  authToken: string,
+): Promise<{
+  message: string;
+  entry: MiscellaneousEntry;
+  totalMiscellaneous: number;
+}> {
+  return apiFetch<any>(
+    `/miscellaneous/${id}`,
+    {
+      method: "PATCH",
+      body: JSON.stringify(data),
+    },
+    authToken,
+  );
+}
+
+export async function deleteMiscellaneous(
+  id: string,
+  authToken: string,
+): Promise<{ message: string; totalMiscellaneous: number }> {
+  return apiFetch<any>(`/miscellaneous/${id}`, { method: "DELETE" }, authToken);
+}
+
 // ─── Admin Insights API ─────────────────────────────────────────────────────
 
 export interface AdminDashboardSummary {
@@ -583,6 +767,7 @@ export interface AdminDashboardSummary {
   pendingVerify: number;
   totalAmount: number;
   paidAmount: number;
+  miscellaneousAmount: number;
   remainingAmount: number;
   totalPenalty: number;
   totalPendingVehicles: number;
@@ -784,9 +969,9 @@ export async function getTeamHistory(
   );
 }
 
-// ─── PDI: edit incomplete verification ──────────────────────────────────────
+// ─── PDI: edit a verification ───────────────────────────────────────────────
 
-export async function editIncompleteVerification(
+export async function editVerification(
   verificationId: string,
   payload: { verifiedQuantity: number; remarks?: string },
   authToken: string,
@@ -797,3 +982,256 @@ export async function editIncompleteVerification(
     authToken,
   );
 }
+
+// Transport API. These use the compatibility routes served by the shared backend.
+const transportQuery = (params: object) => {
+  const query = new URLSearchParams();
+  Object.entries(params).forEach(([key, value]) => {
+    if (value !== undefined && value !== null && value !== "")
+      query.set(key, String(value));
+  });
+  const value = query.toString();
+  return value ? `?${value}` : "";
+};
+
+export const createUser = (
+  data: {
+    name: string;
+    email: string;
+    password: string;
+    role: string;
+    phone?: string;
+    vehicleNumber?: string;
+  },
+  token: string,
+) =>
+  apiFetch<{ message: string; user: UserResponse }>(
+    "/users",
+    { method: "POST", body: JSON.stringify(data) },
+    token,
+  );
+
+export const createDriver = (
+  data: { name: string; vehicleNumber: string; userId?: string | null },
+  token: string,
+) =>
+  apiFetch<{ message: string; driver: Driver }>(
+    "/drivers",
+    { method: "POST", body: JSON.stringify(data) },
+    token,
+  );
+
+export const getAllDrivers = (
+  token: string,
+  params: { search?: string; isActive?: boolean } & PaginationParams = {},
+) =>
+  apiFetch<{ drivers: Driver[]; pagination: PaginationMeta }>(
+    `/drivers${transportQuery(params)}`,
+    {},
+    token,
+  );
+
+export const getDriverById = (id: string, token: string) =>
+  apiFetch<{ driver: Driver }>(`/drivers/${id}`, {}, token);
+
+export const getDriverSummary = (
+  id: string,
+  token: string,
+  params: PaginationParams = {},
+) =>
+  apiFetch<DriverSummary>(
+    `/drivers/${id}/summary${transportQuery(params)}`,
+    {},
+    token,
+  );
+
+export const updateDriver = (
+  id: string,
+  data: Partial<Driver>,
+  token: string,
+) =>
+  apiFetch<{ message: string; driver: Driver }>(
+    `/drivers/${id}`,
+    { method: "PATCH", body: JSON.stringify(data) },
+    token,
+  );
+
+export const deleteDriver = (id: string, token: string) =>
+  apiFetch<{ message: string }>(`/drivers/${id}`, { method: "DELETE" }, token);
+
+export interface CreateVisitPayload {
+  driverId: string;
+  destination: string;
+  startDate: string;
+  endDate: string;
+  quantity?: number;
+  billNumber?: string;
+  distance?: number;
+  vehicleNumber?: string;
+}
+
+export const createVisit = (data: CreateVisitPayload, token: string) =>
+  apiFetch<{ message: string; visit: Visit }>(
+    "/visits",
+    { method: "POST", body: JSON.stringify(data) },
+    token,
+  );
+
+export const getAllVisits = (
+  token: string,
+  params: {
+    driverId?: string;
+    search?: string;
+    startDate?: string;
+    endDate?: string;
+    month?: number;
+    year?: number;
+  } & PaginationParams = {},
+) =>
+  apiFetch<{ visits: Visit[]; pagination: PaginationMeta }>(
+    `/visits${transportQuery(params)}`,
+    {},
+    token,
+  );
+
+export const getVisitById = (id: string, token: string) =>
+  apiFetch<{ visit: Visit; expense: Expense | null }>(
+    `/visits/${id}`,
+    {},
+    token,
+  );
+
+export const updateVisit = (
+  id: string,
+  data: Partial<CreateVisitPayload>,
+  token: string,
+) =>
+  apiFetch<{ message: string; visit: Visit }>(
+    `/visits/${id}`,
+    { method: "PATCH", body: JSON.stringify(data) },
+    token,
+  );
+
+export const deleteVisit = (id: string, token: string) =>
+  apiFetch<{ message: string }>(`/visits/${id}`, { method: "DELETE" }, token);
+
+export interface ExpenseItemPayload {
+  amount: number;
+  paidBy: "driver" | "company";
+  description?: string;
+}
+export interface UpsertExpensePayload {
+  food?: ExpenseItemPayload;
+  cng?: ExpenseItemPayload;
+  other?: ExpenseItemPayload & { description: string };
+}
+
+export const upsertExpense = (
+  visitId: string,
+  data: UpsertExpensePayload,
+  token: string,
+) =>
+  apiFetch<{ message: string; expense: Expense }>(
+    `/expenses/visit/${visitId}`,
+    { method: "POST", body: JSON.stringify(data) },
+    token,
+  );
+
+export const getExpenseByVisit = (visitId: string, token: string) =>
+  apiFetch<{ expense: Expense }>(`/expenses/visit/${visitId}`, {}, token);
+
+export const getPendingExpenses = (token: string) =>
+  apiFetch<{ expenses: (Expense & { visit: Visit })[] }>(
+    "/expenses/pending",
+    {},
+    token,
+  );
+
+export const approveExpenseItem = (
+  expenseId: string,
+  type: "food" | "cng" | "other",
+  token: string,
+) =>
+  apiFetch<{ message: string; expense: Expense }>(
+    `/expenses/${expenseId}/approve`,
+    { method: "POST", body: JSON.stringify({ type }) },
+    token,
+  );
+
+export const rejectExpenseItem = (
+  expenseId: string,
+  type: "food" | "cng" | "other",
+  remark: string,
+  token: string,
+) =>
+  apiFetch<{ message: string; expense: Expense }>(
+    `/expenses/${expenseId}/reject`,
+    { method: "POST", body: JSON.stringify({ type, remark }) },
+    token,
+  );
+
+export const getAdminDashboard = (
+  token: string,
+  params: {
+    startDate?: string;
+    endDate?: string;
+    month?: number;
+    year?: number;
+  } = {},
+) =>
+  apiFetch<AdminDashboard>(
+    `/dashboard/admin${transportQuery(params)}`,
+    {},
+    token,
+  );
+
+export const getAccountsDashboard = (
+  token: string,
+  params: {
+    startDate?: string;
+    endDate?: string;
+    month?: number;
+    year?: number;
+  } = {},
+) =>
+  apiFetch<AccountsDashboard>(
+    `/dashboard/accounts${transportQuery(params)}`,
+    {},
+    token,
+  );
+
+export const getDriverDashboard = (
+  driverId: string,
+  token: string,
+  params: { startDate?: string; endDate?: string } = {},
+) =>
+  apiFetch<DriverDashboard>(
+    `/dashboard/driver/${driverId}${transportQuery(params)}`,
+    {},
+    token,
+  );
+
+export const getMyDriverDashboard = (
+  token: string,
+  params: { startDate?: string; endDate?: string } = {},
+) =>
+  apiFetch<DriverDashboard>(
+    `/dashboard/driver/me${transportQuery(params)}`,
+    {},
+    token,
+  );
+
+export const getVisitReport = (
+  token: string,
+  params: { driverId?: string; startDate?: string; endDate?: string } = {},
+) =>
+  apiFetch<{
+    report: (Visit & { expense: Expense | null })[];
+    totals: {
+      totalVisits: number;
+      totalDistance: number;
+      totalExpense: number;
+      pendingReimbursement: number;
+      approvedReimbursement: number;
+    };
+  }>(`/reports/visits${transportQuery(params)}`, {}, token);

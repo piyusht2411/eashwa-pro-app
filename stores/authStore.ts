@@ -53,7 +53,10 @@ export const useAuthStore = create<AuthStore>()(
           const user: AppUser = {
             _id: response.user._id,
             name: response.user.name,
-            role: response.user.role,
+            role: response.user.role as any,
+            portal: response.user.portal,
+            email: response.user.email,
+            phone: response.user.phone,
           };
           set({ isSignedIn: true, user, token: response.token });
           return { success: true };

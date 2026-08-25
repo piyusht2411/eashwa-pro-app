@@ -6,7 +6,7 @@ import { Container, ProductionLog, useProductionStore } from "@/stores/productio
 import { GradientHeader } from "@/components/ui/GradientHeader";
 import { ClipboardList, Plus, Target } from "lucide-react-native";
 import { useCallback, useEffect, useState } from "react";
-import { ActivityIndicator, Alert, Pressable, RefreshControl, ScrollView, StyleSheet, Text, TextInput, View } from "react-native";
+import { ActivityIndicator, Alert, KeyboardAvoidingView, Platform, Pressable, RefreshControl, ScrollView, StyleSheet, Text, TextInput, View } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 
 const getAssignedTeamId = (container: Container) =>
@@ -116,13 +116,20 @@ export default function LogProduction() {
         subtitle="Submit your daily output"
         leftIcon={<ClipboardList color="#fff" size={20} />}
       />
+      <KeyboardAvoidingView
+        behavior={Platform.OS === "ios" ? "padding" : undefined}
+        keyboardVerticalOffset={Platform.OS === "ios" ? 0 : 0}
+        style={s.flex}
+      >
       <ScrollView
         showsVerticalScrollIndicator={false}
         onScroll={({ nativeEvent }) => {
           if (isNearScrollBottom(nativeEvent)) handleLoadMore();
         }}
         scrollEventThrottle={400}
-        contentContainerStyle={{ paddingTop: 16 }}
+        keyboardShouldPersistTaps="handled"
+        keyboardDismissMode="interactive"
+        contentContainerStyle={{ paddingTop: 16, paddingBottom: 220 }}
         refreshControl={<RefreshControl refreshing={refreshing} onRefresh={handleRefresh} tintColor="#F97316" />}
       >
 
@@ -264,12 +271,14 @@ export default function LogProduction() {
         {loadingMore && <ActivityIndicator color="#F97316" style={{ marginVertical: 16 }} />}
         <View style={{ height: 24 }} />
       </ScrollView>
+      </KeyboardAvoidingView>
     </View>
   );
 }
 
 const s = StyleSheet.create({
   safe: { flex: 1, backgroundColor: "#F8FAFC" },
+  flex: { flex: 1 },
   header: { flexDirection: "row", alignItems: "center", gap: 10, paddingHorizontal: 20, paddingTop: 20, paddingBottom: 16 },
   title: { fontSize: 22, fontWeight: "800", color: "#0F172A" },
   sectionLabel: { fontSize: 11, fontWeight: "700", color: "#94A3B8", letterSpacing: 1.5, paddingHorizontal: 20, marginBottom: 10 },

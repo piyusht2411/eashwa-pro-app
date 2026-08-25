@@ -1,7 +1,7 @@
 {
   "expo": {
     "name": "Eashwa PRO",
-    "slug": "eashwa-stock",
+    "slug": "eashwa-pro",
     "version": "1.0.0",
     "orientation": "portrait",
     "icon": "./assets/images/icon.png",
@@ -56,7 +56,7 @@
     "extra": {
       "router": {},
       "eas": {
-        "projectId": "adc18fd0-a766-40a8-9d26-110f611ce756"
+        "projectId": "4dd36e52-5c26-44d9-b8f9-1e0f36681074"
       }
     },
     "owner": "piyushthakur2411"

@@ -64,6 +64,10 @@ export interface Payment {
   totalAmount: number;
   paidAmount: number;
   remainingAmount: number;
+  // Live hold/penalty for the container (pending vehicles × hold per vehicle)
+  pendingQuantity?: number;
+  penaltyPerUnit?: number;
+  totalPenalty?: number;
   payments: Array<{
     amount: number;
     paidAt: string;
@@ -154,6 +158,7 @@ interface ProductionState {
     }>,
     authToken: string,
   ) => Promise<void>;
+  deleteContainer: (containerId: string, authToken: string) => Promise<void>;
 
   fetchProductionLogs: (authToken: string) => Promise<void>;
   submitProductionLog: (
@@ -162,6 +167,12 @@ interface ProductionState {
     reportedQuantity: number,
     authToken: string,
   ) => Promise<void>;
+  updateProductionLog: (
+    logId: string,
+    data: Partial<{ reportedQuantity: number; date: string }>,
+    authToken: string,
+  ) => Promise<void>;
+  deleteProductionLog: (logId: string, authToken: string) => Promise<void>;
   fetchLogsByContainer: (
     containerId: string,
     authToken: string,
@@ -178,6 +189,12 @@ interface ProductionState {
     authToken?: string,
   ) => Promise<void>;
   unverifyProductionLog: (logId: string, authToken: string) => Promise<void>;
+  editVerification: (
+    verificationId: string,
+    verifiedQuantity: number,
+    remarks: string | undefined,
+    authToken: string,
+  ) => Promise<void>;
   fetchVerificationsByContainer: (
     containerId: string,
     authToken: string,
@@ -190,6 +207,17 @@ interface ProductionState {
     containerId: string,
     amount: number,
     note: string,
+    authToken: string,
+  ) => Promise<void>;
+  updatePaymentEntry: (
+    containerId: string,
+    index: number,
+    data: { amount?: number; note?: string },
+    authToken: string,
+  ) => Promise<void>;
+  deletePaymentEntry: (
+    containerId: string,
+    index: number,
     authToken: string,
   ) => Promise<void>;
 
@@ -371,6 +399,21 @@ export const useProductionStore = create<ProductionState>()((set, get) => ({
     }
   },
 
+  // Delete a container (admin only)
+  deleteContainer: async (containerId, authToken) => {
+    set({ loading: true, error: null });
+    try {
+      await API.deleteContainer(containerId, authToken);
+      set((state) => ({
+        containers: state.containers.filter((c) => c._id !== containerId),
+        loading: false,
+      }));
+    } catch (error: any) {
+      set({ loading: false, error: error.message });
+      throw error;
+    }
+  },
+
   // Update container status (admin only)
   updateContainerStatus: async (containerId, status, authToken) => {
     set({ loading: true, error: null });
@@ -415,6 +458,44 @@ export const useProductionStore = create<ProductionState>()((set, get) => ({
       );
       set((state) => ({
         productionLogs: [response.log as any, ...state.productionLogs],
+        loading: false,
+      }));
+    } catch (error: any) {
+      set({ loading: false, error: error.message });
+      throw error;
+    }
+  },
+
+  // Edit own production log (team only)
+  updateProductionLog: async (logId, data, authToken) => {
+    set({ loading: true, error: null });
+    try {
+      const response = await API.updateProductionLog(logId, data, authToken);
+      set((state) => ({
+        productionLogs: state.productionLogs.map((l) =>
+          l._id === logId ? (response.log as any) : l,
+        ),
+        loading: false,
+      }));
+    } catch (error: any) {
+      set({ loading: false, error: error.message });
+      throw error;
+    }
+  },
+
+  // Delete own production log (team only)
+  deleteProductionLog: async (logId, authToken) => {
+    set({ loading: true, error: null });
+    try {
+      await API.deleteProductionLog(logId, authToken);
+      set((state) => ({
+        productionLogs: state.productionLogs.filter((l) => l._id !== logId),
+        // Drop any verification tied to this log too
+        pdiVerifications: state.pdiVerifications.filter((v) => {
+          const vLogId =
+            typeof v.productionLog === "string" ? v.productionLog : v.productionLog._id;
+          return vLogId !== logId;
+        }),
         loading: false,
       }));
     } catch (error: any) {
@@ -537,6 +618,42 @@ export const useProductionStore = create<ProductionState>()((set, get) => ({
     }
   },
 
+  // Edit own verification (PDI only)
+  editVerification: async (verificationId, verifiedQuantity, remarks, authToken) => {
+    set({ loading: true, error: null });
+    try {
+      const response = await API.editVerification(
+        verificationId,
+        { verifiedQuantity, remarks },
+        authToken,
+      );
+      const updated = response.verification as any;
+      set((state) => ({
+        pdiVerifications: state.pdiVerifications.map((v) =>
+          v._id === verificationId ? updated : v,
+        ),
+        // Keep the linked production log's numbers in sync locally
+        productionLogs: state.productionLogs.map((l) => {
+          const vLogId =
+            typeof updated.productionLog === "string"
+              ? updated.productionLog
+              : updated.productionLog?._id;
+          return l._id === vLogId
+            ? {
+                ...l,
+                verifiedQuantity: updated.verifiedQuantity,
+                status: updated.isIncomplete ? "incomplete" : "verified",
+              }
+            : l;
+        }),
+        loading: false,
+      }));
+    } catch (error: any) {
+      set({ loading: false, error: error.message });
+      throw error;
+    }
+  },
+
   // Fetch verifications for a container
   fetchVerificationsByContainer: async (containerId, authToken, page = 1) => {
     set({ loading: true, error: null });
@@ -604,6 +721,40 @@ export const useProductionStore = create<ProductionState>()((set, get) => ({
         { amount, note },
         authToken,
       );
+      set((state) => ({
+        payments: state.payments.map((p) =>
+          p._id === response.payment._id ? (response.payment as any) : p,
+        ),
+        loading: false,
+      }));
+    } catch (error: any) {
+      set({ loading: false, error: error.message });
+      throw error;
+    }
+  },
+
+  // Edit a recorded payment transaction (admin only)
+  updatePaymentEntry: async (containerId, index, data, authToken) => {
+    set({ loading: true, error: null });
+    try {
+      const response = await API.updatePaymentEntry(containerId, index, data, authToken);
+      set((state) => ({
+        payments: state.payments.map((p) =>
+          p._id === response.payment._id ? (response.payment as any) : p,
+        ),
+        loading: false,
+      }));
+    } catch (error: any) {
+      set({ loading: false, error: error.message });
+      throw error;
+    }
+  },
+
+  // Delete a recorded payment transaction (admin only)
+  deletePaymentEntry: async (containerId, index, authToken) => {
+    set({ loading: true, error: null });
+    try {
+      const response = await API.deletePaymentEntry(containerId, index, authToken);
       set((state) => ({
         payments: state.payments.map((p) =>
           p._id === response.payment._id ? (response.payment as any) : p,

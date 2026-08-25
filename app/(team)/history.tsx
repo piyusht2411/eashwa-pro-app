@@ -3,13 +3,18 @@ import { GradientHeader } from "@/components/ui/GradientHeader";
 import { getTeamHistory, TeamHistoryLog } from "@/lib/api";
 import { colors, fonts, radius } from "@/lib/theme";
 import { useAuthStore } from "@/stores/authStore";
-import { History as HistoryIcon } from "lucide-react-native";
+import { useProductionStore } from "@/stores/productionStore";
+import { Edit3, History as HistoryIcon, Trash2, X } from "lucide-react-native";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import {
   ActivityIndicator,
   Alert,
   FlatList,
+  KeyboardAvoidingView,
+  Modal,
+  Platform,
   Pressable,
+  ScrollView,
   StyleSheet,
   Switch,
   Text,
@@ -45,6 +50,7 @@ const statusStyle = (status: TeamHistoryLog["status"]) => {
 
 export default function TeamHistory() {
   const { token } = useAuthStore();
+  const { updateProductionLog, deleteProductionLog } = useProductionStore();
   const now = useMemo(() => new Date(), []);
   const months = useMemo(() => {
     const prev = new Date(now.getFullYear(), now.getMonth() - 1, 1);
@@ -63,6 +69,12 @@ export default function TeamHistory() {
   const [loading, setLoading] = useState(true);
   const [loadingMore, setLoadingMore] = useState(false);
   const [refreshing, setRefreshing] = useState(false);
+
+  // Edit / delete state
+  const [editingLog, setEditingLog] = useState<TeamHistoryLog | null>(null);
+  const [editQty, setEditQty] = useState("");
+  const [saving, setSaving] = useState(false);
+  const [deletingId, setDeletingId] = useState<string | null>(null);
 
   const loadPage = useCallback(
     async (target: number, reset: boolean) => {
@@ -101,6 +113,64 @@ export default function TeamHistory() {
   const handleEndReached = () => {
     if (loadingMore || loading || !hasNext) return;
     loadPage(page + 1, false);
+  };
+
+  const openEdit = (log: TeamHistoryLog) => {
+    setEditingLog(log);
+    setEditQty(String(log.reportedQuantity));
+  };
+
+  const closeEdit = () => {
+    setEditingLog(null);
+    setEditQty("");
+  };
+
+  const handleSaveEdit = async () => {
+    if (saving || !editingLog || !token) return;
+    const qty = Number(editQty);
+    if (!editQty || Number.isNaN(qty) || qty < 0) {
+      Alert.alert("Error", "Enter a valid reported quantity");
+      return;
+    }
+    setSaving(true);
+    try {
+      await updateProductionLog(editingLog._id, { reportedQuantity: qty }, token);
+      closeEdit();
+      await loadPage(1, true);
+      Alert.alert("Updated", "Production log updated");
+    } catch (e: any) {
+      Alert.alert("Error", e.message || "Failed to update log");
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const handleDelete = (log: TeamHistoryLog) => {
+    if (!token) return;
+    Alert.alert(
+      "Delete this log?",
+      "This removes your production report. If it was already verified, that verification is removed too and payments are recalculated.",
+      [
+        { text: "Cancel", style: "cancel" },
+        {
+          text: "Delete",
+          style: "destructive",
+          onPress: async () => {
+            if (!token) return;
+            setDeletingId(log._id);
+            try {
+              await deleteProductionLog(log._id, token);
+              setLogs((prev) => prev.filter((l) => l._id !== log._id));
+              Alert.alert("Deleted", "Production log removed");
+            } catch (e: any) {
+              Alert.alert("Error", e.message || "Failed to delete log");
+            } finally {
+              setDeletingId(null);
+            }
+          },
+        },
+      ],
+    );
   };
 
   return (
@@ -174,6 +244,8 @@ export default function TeamHistory() {
               <Text style={s.emptyText}>No logs for this filter</Text>
             </Card>
           }
+          keyboardShouldPersistTaps="handled"
+          keyboardDismissMode="on-drag"
           ListFooterComponent={
             loadingMore ? <ActivityIndicator color={colors.primary} style={{ marginVertical: 16 }} /> : null
           }
@@ -209,11 +281,83 @@ export default function TeamHistory() {
                 {item.pdiVerification?.remarks ? (
                   <Text style={s.remarks}>{item.pdiVerification.remarks}</Text>
                 ) : null}
+                <View style={s.actions}>
+                  <Pressable onPress={() => openEdit(item)} style={s.editBtn} hitSlop={6}>
+                    <Edit3 color={colors.primary} size={14} />
+                    <Text style={s.editBtnText}>Edit</Text>
+                  </Pressable>
+                  <Pressable
+                    onPress={() => handleDelete(item)}
+                    disabled={deletingId === item._id}
+                    style={s.deleteBtn}
+                    hitSlop={6}
+                  >
+                    {deletingId === item._id ? (
+                      <ActivityIndicator color={colors.danger} size="small" />
+                    ) : (
+                      <>
+                        <Trash2 color={colors.danger} size={14} />
+                        <Text style={s.deleteBtnText}>Delete</Text>
+                      </>
+                    )}
+                  </Pressable>
+                </View>
               </Card>
             );
           }}
         />
       )}
+
+      {/* Edit log modal */}
+      <Modal visible={!!editingLog} transparent animationType="slide" onRequestClose={closeEdit}>
+        <View style={s.overlay}>
+          <KeyboardAvoidingView
+            behavior={Platform.OS === "ios" ? "padding" : "height"}
+            style={{ width: "100%" }}
+          >
+            <View style={s.modal}>
+              <View style={s.modalHeader}>
+                <Text style={s.modalTitle}>Edit Production Log</Text>
+                <Pressable onPress={closeEdit} hitSlop={8}>
+                  <X color={colors.textMuted} size={22} />
+                </Pressable>
+              </View>
+              {editingLog && (
+                <ScrollView
+                  keyboardShouldPersistTaps="handled"
+                  showsVerticalScrollIndicator={false}
+                  contentContainerStyle={{ paddingBottom: 12 }}
+                >
+                  <Text style={s.modalMeta}>
+                    {editingLog.container.model} · {formatDate(editingLog.date)}
+                  </Text>
+                  <Text style={s.fieldLabel}>Reported quantity</Text>
+                  <TextInput
+                    style={s.fieldInput}
+                    value={editQty}
+                    onChangeText={setEditQty}
+                    placeholder="Enter reported count"
+                    placeholderTextColor={colors.textFaint}
+                    keyboardType="numeric"
+                    editable={!saving}
+                  />
+                  <Pressable
+                    onPress={handleSaveEdit}
+                    disabled={saving}
+                    style={[s.saveBtn, saving && { opacity: 0.65 }]}
+                  >
+                    {saving ? (
+                      <ActivityIndicator color="#fff" />
+                    ) : (
+                      <Text style={s.saveBtnText}>Save changes</Text>
+                    )}
+                  </Pressable>
+                </ScrollView>
+              )}
+            </View>
+          </KeyboardAvoidingView>
+        </View>
+      </Modal>
     </View>
   );
 }
@@ -310,4 +454,68 @@ const s = StyleSheet.create({
     marginTop: 6,
     fontStyle: "italic",
   },
+  actions: { flexDirection: "row", gap: 8, marginTop: 12 },
+  editBtn: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 6,
+    backgroundColor: colors.primarySofter,
+    borderWidth: 1,
+    borderColor: colors.primaryBorder,
+    paddingHorizontal: 12,
+    paddingVertical: 7,
+    borderRadius: radius.sm,
+  },
+  editBtnText: { fontFamily: fonts.bold, fontSize: 12, color: colors.primaryDark },
+  deleteBtn: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 6,
+    backgroundColor: colors.dangerSoft,
+    borderWidth: 1,
+    borderColor: colors.dangerBorder,
+    paddingHorizontal: 12,
+    paddingVertical: 7,
+    borderRadius: radius.sm,
+    minWidth: 90,
+    justifyContent: "center",
+  },
+  deleteBtnText: { fontFamily: fonts.bold, fontSize: 12, color: colors.danger },
+  overlay: { flex: 1, backgroundColor: "#00000080", justifyContent: "flex-end" },
+  modal: {
+    backgroundColor: colors.bg,
+    borderTopLeftRadius: 28,
+    borderTopRightRadius: 28,
+    padding: 24,
+    borderTopWidth: 1,
+    borderColor: colors.border,
+  },
+  modalHeader: {
+    flexDirection: "row",
+    justifyContent: "space-between",
+    alignItems: "center",
+    marginBottom: 8,
+  },
+  modalTitle: { fontFamily: fonts.extrabold, fontSize: 20, color: colors.text },
+  modalMeta: { fontFamily: fonts.medium, fontSize: 13, color: colors.textMuted, marginBottom: 16 },
+  fieldLabel: { fontFamily: fonts.semibold, fontSize: 12, color: colors.textSecondary, marginBottom: 6 },
+  fieldInput: {
+    backgroundColor: colors.bgSubtle,
+    borderWidth: 1,
+    borderColor: colors.border,
+    borderRadius: radius.md,
+    paddingHorizontal: 14,
+    paddingVertical: 12,
+    fontFamily: fonts.medium,
+    fontSize: 15,
+    color: colors.text,
+  },
+  saveBtn: {
+    backgroundColor: colors.primary,
+    borderRadius: radius.md,
+    paddingVertical: 14,
+    alignItems: "center",
+    marginTop: 18,
+  },
+  saveBtnText: { color: "#fff", fontFamily: fonts.bold, fontSize: 16 },
 });

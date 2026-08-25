@@ -95,6 +95,9 @@ export default function RootLayout() {
           <Stack.Screen name="(admin)" />
           <Stack.Screen name="(team)" />
           <Stack.Screen name="(pdi)" />
+          <Stack.Screen name="(accounts)" />
+          <Stack.Screen name="(driver)" />
+          <Stack.Screen name="(transport-admin)" />
           <Stack.Screen name="notification-detail" />
           <Stack.Screen name="notifications" />
         </Stack>

@@ -1,5 +1,5 @@
 import { useAuthStore } from "@/stores/authStore";
-import { editIncompleteVerification, getProductionLogById } from "@/lib/api";
+import { editVerification, getProductionLogById } from "@/lib/api";
 import { isNearScrollBottom } from "@/lib/scrollPagination";
 import { PDIVerification, ProductionLog, useProductionStore } from "@/stores/productionStore";
 import { GradientHeader } from "@/components/ui/GradientHeader";
@@ -166,7 +166,7 @@ export default function PdiVerify() {
     }
     setEditSubmitting(true);
     try {
-      await editIncompleteVerification(
+      await editVerification(
         editing._id,
         { verifiedQuantity: qty, remarks: editRemarks || undefined },
         token,
@@ -333,12 +333,10 @@ export default function PdiVerify() {
                   </View>
                   {verification.remarks && <Text style={s.doneNote}>{verification.remarks}</Text>}
                   <View style={s.doneActions}>
-                    {verification.isIncomplete && (
-                      <Pressable onPress={() => openEdit(verification)} style={s.editBtn}>
-                        <Edit3 color="#D97706" size={14} />
-                        <Text style={s.editBtnText}>Edit</Text>
-                      </Pressable>
-                    )}
+                    <Pressable onPress={() => openEdit(verification)} style={s.editBtn}>
+                      <Edit3 color="#D97706" size={14} />
+                      <Text style={s.editBtnText}>Edit</Text>
+                    </Pressable>
                     <Pressable
                       onPress={() => handleUnverify(verification)}
                       disabled={unverifyingId === verification._id}
