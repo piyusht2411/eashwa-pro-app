@@ -107,6 +107,16 @@ export const typography: Record<string, T> = {
 };
 
 export const shadow = {
+  xs: Platform.select({
+    ios: {
+      shadowColor: "#0F172A",
+      shadowOpacity: 0.04,
+      shadowRadius: 4,
+      shadowOffset: { width: 0, height: 1 },
+    },
+    android: { elevation: 1 },
+    default: {},
+  }) as object,
   sm: Platform.select({
     ios: {
       shadowColor: "#0F172A",
@@ -114,7 +124,7 @@ export const shadow = {
       shadowRadius: 8,
       shadowOffset: { width: 0, height: 2 },
     },
-    android: { elevation: 1 },
+    android: { elevation: 2 },
     default: {},
   }) as object,
   md: Platform.select({
@@ -124,7 +134,7 @@ export const shadow = {
       shadowRadius: 16,
       shadowOffset: { width: 0, height: 4 },
     },
-    android: { elevation: 3 },
+    android: { elevation: 4 },
     default: {},
   }) as object,
   lg: Platform.select({
@@ -137,7 +147,42 @@ export const shadow = {
     android: { elevation: 6 },
     default: {},
   }) as object,
+  /** Warm brand-tinted lift, for primary CTAs and hero cards. */
+  brand: Platform.select({
+    ios: {
+      shadowColor: "#EA580C",
+      shadowOpacity: 0.28,
+      shadowRadius: 18,
+      shadowOffset: { width: 0, height: 8 },
+    },
+    android: { elevation: 8 },
+    default: {},
+  }) as object,
 };
 
-export const theme = { colors, spacing, radius, fonts, typography, shadow };
+/**
+ * Shared gradient ramps. Tuples are `as const` so they satisfy
+ * expo-linear-gradient's readonly [string, string, ...string[]] colour prop.
+ */
+export const gradients = {
+  brand: ["#FB923C", "#F97316", "#EA580C"] as const,
+  brandDeep: ["#F97316", "#EA580C", "#C2410C"] as const,
+  /** Subtle page header wash behind white cards. */
+  headerWash: ["#FFFFFF", "#FFF7ED"] as const,
+  slate: ["#334155", "#1E293B"] as const,
+};
+
+/** Accent ramp for metric tiles — keeps dashboards visually varied but on-brand. */
+export const accents = {
+  brand: { fg: colors.primaryDark, bg: colors.primarySofter, ring: colors.primaryBorder },
+  info: { fg: colors.info, bg: colors.infoSoft, ring: colors.infoBorder },
+  success: { fg: colors.success, bg: colors.successSoft, ring: colors.successBorder },
+  warning: { fg: colors.warning, bg: colors.warningSoft, ring: colors.warningBorder },
+  danger: { fg: colors.danger, bg: colors.dangerSoft, ring: colors.dangerBorder },
+  neutral: { fg: colors.textSecondary, bg: colors.surfaceAlt, ring: colors.border },
+};
+
+export type AccentName = keyof typeof accents;
+
+export const theme = { colors, spacing, radius, fonts, typography, shadow, gradients, accents };
 export default theme;

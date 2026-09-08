@@ -4,6 +4,7 @@ import {
   Alert,
   FlatList,
   RefreshControl,
+  ScrollView,
   StyleSheet,
   Switch,
   Text,
@@ -12,12 +13,37 @@ import {
   View,
 } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
-import { Plus, X, User } from "lucide-react-native";
+import { router } from "expo-router";
+import { ArrowLeft, Plus, Truck, UserPlus, Users, X } from "lucide-react-native";
 
 import { getAllUsers, createUser, updateUser } from "@/lib/api";
 import { useAuthStore } from "@/stores/authStore";
 import type { UserResponse } from "@/lib/api";
-import { colors, fonts, radius, shadow, spacing } from "@/lib/theme";
+import { accents, AccentName, colors, fonts, radius, shadow, spacing } from "@/lib/theme";
+import { formatCount } from "@/lib/format";
+import EmptyState from "@/components/ui/EmptyState";
+
+const ROLES = ["accounts", "admin", "driver"] as const;
+
+const ROLE_ACCENT: Record<string, AccentName> = {
+  admin: "brand",
+  accounts: "info",
+  driver: "success",
+};
+
+const ROLE_LABEL: Record<string, string> = {
+  admin: "Admin",
+  accounts: "Accounts",
+  driver: "Driver",
+};
+
+/** Initials from a name: "Ravi Kumar" → "RK". */
+function initials(name?: string): string {
+  const parts = (name ?? "").trim().split(/\s+/).filter(Boolean);
+  if (parts.length === 0) return "—";
+  if (parts.length === 1) return parts[0].slice(0, 2).toUpperCase();
+  return (parts[0][0] + parts[parts.length - 1][0]).toUpperCase();
+}
 
 export default function AdminUsersScreen() {
   const { token } = useAuthStore();
@@ -48,31 +74,19 @@ export default function AdminUsersScreen() {
     }
   }, [token]);
 
-  useEffect(() => {
-    load();
-  }, [load]);
+  useEffect(() => { load(); }, [load]);
 
   const handleCreate = async () => {
     if (!form.name.trim() || !form.email.trim() || !form.password.trim()) {
       Alert.alert("Required", "Name, email and password are required");
       return;
     }
-    if (form.role === "driver" && !form.vehicleNumber.trim()) {
-      Alert.alert("Required", "Vehicle number is required for driver accounts");
-      return;
-    }
+    // Vehicle number is optional for driver accounts — it can be assigned later.
     if (!token) return;
     setCreating(true);
     try {
       await createUser({ ...form }, token);
-      setForm({
-        name: "",
-        email: "",
-        password: "",
-        role: "accounts",
-        phone: "",
-        vehicleNumber: "",
-      });
+      setForm({ name: "", email: "", password: "", role: "accounts", phone: "", vehicleNumber: "" });
       setShowCreate(false);
       load();
     } catch (e: any) {
@@ -82,174 +96,215 @@ export default function AdminUsersScreen() {
     }
   };
 
-  const toggleActive = async (user: UserResponse) => {
+  const toggleActive = (user: UserResponse) => {
     if (!token) return;
-    try {
-      await updateUser(user._id, { isActive: !user.isActive }, token);
-      load();
-    } catch (e: any) {
-      Alert.alert("Error", e.message);
+    const turningOff = user.isActive;
+    const apply = async () => {
+      try {
+        await updateUser(user._id, { isActive: !user.isActive }, token);
+        load();
+      } catch (e: any) { Alert.alert("Error", e.message); }
+    };
+
+    // Deactivating locks someone out of the app — worth a confirmation.
+    if (turningOff) {
+      Alert.alert("Deactivate account", `${user.name} will no longer be able to sign in.`, [
+        { text: "Cancel", style: "cancel" },
+        { text: "Deactivate", style: "destructive", onPress: apply },
+      ]);
+    } else {
+      apply();
     }
   };
 
-  const roleColors: Record<string, string> = {
-    admin: colors.primary,
-    accounts: colors.info,
-    driver: colors.success,
-  };
+  const renderItem = ({ item }: { item: UserResponse }) => {
+    const a = accents[ROLE_ACCENT[item.role] ?? "neutral"];
+    const inactive = !item.isActive;
 
-  const renderItem = ({ item }: { item: UserResponse }) => (
-    <View style={s.card}>
-      <View style={s.cardLeft}>
-        <View
-          style={[
-            s.avatar,
-            {
-              backgroundColor: (roleColors[item.role] ?? colors.primary) + "22",
-            },
-          ]}
-        >
-          <User size={18} color={roleColors[item.role] ?? colors.primary} />
+    return (
+      <View style={[s.card, inactive && s.cardInactive]}>
+        <View style={[s.avatar, { backgroundColor: a.bg, borderColor: a.ring }]}>
+          <Text style={[s.avatarText, { color: a.fg }]}>{initials(item.name)}</Text>
         </View>
-        <View>
-          <Text style={s.name}>{item.name}</Text>
-          <Text style={s.email}>{item.email}</Text>
-          <View
-            style={[
-              s.roleBadge,
-              {
-                backgroundColor:
-                  (roleColors[item.role] ?? colors.primary) + "22",
-              },
-            ]}
-          >
-            <Text
-              style={[
-                s.roleText,
-                { color: roleColors[item.role] ?? colors.primary },
-              ]}
-            >
-              {item.role}
-            </Text>
+
+        <View style={s.cardMid}>
+          <Text style={s.name} numberOfLines={1}>{item.name}</Text>
+          <Text style={s.email} numberOfLines={1}>{item.email}</Text>
+          <View style={[s.roleBadge, { backgroundColor: a.bg, borderColor: a.ring }]}>
+            <View style={[s.roleDot, { backgroundColor: a.fg }]} />
+            <Text style={[s.roleText, { color: a.fg }]}>{ROLE_LABEL[item.role] ?? item.role}</Text>
           </View>
         </View>
+
+        <View style={s.cardRight}>
+          <Switch
+            value={item.isActive}
+            onValueChange={() => toggleActive(item)}
+            trackColor={{ false: colors.border, true: colors.successBorder }}
+            thumbColor={item.isActive ? colors.success : colors.textFaint}
+          />
+          <Text style={[s.switchLabel, item.isActive && { color: colors.success }]}>
+            {item.isActive ? "Active" : "Inactive"}
+          </Text>
+        </View>
       </View>
-      <Switch
-        value={item.isActive}
-        onValueChange={() => toggleActive(item)}
-        trackColor={{ false: colors.border, true: colors.successBorder }}
-        thumbColor={item.isActive ? colors.success : colors.textFaint}
-      />
-    </View>
-  );
+    );
+  };
 
   return (
     <SafeAreaView style={s.root} edges={["top"]}>
       <View style={s.topBar}>
-        <Text style={s.title}>System Users</Text>
+        <TouchableOpacity style={s.back} onPress={() => router.back()} hitSlop={8}>
+          <ArrowLeft size={19} color={colors.text} strokeWidth={2.4} />
+        </TouchableOpacity>
+        <Text style={s.title}>Users</Text>
+        {!loading && users.length > 0 ? (
+          <View style={s.countChip}><Text style={s.countText}>{formatCount(users.length)}</Text></View>
+        ) : null}
+        <View style={{ flex: 1 }} />
         <TouchableOpacity
-          style={s.fab}
+          style={[s.addBtn, showCreate && s.addBtnActive]}
           onPress={() => setShowCreate((v) => !v)}
-          activeOpacity={0.85}
+          activeOpacity={0.88}
         >
           {showCreate ? (
-            <X size={18} color={colors.white} />
+            <>
+              <X size={15} color={colors.textSecondary} strokeWidth={2.8} />
+              <Text style={s.addBtnTextActive}>Cancel</Text>
+            </>
           ) : (
-            <Plus size={18} color={colors.white} />
+            <>
+              <Plus size={15} color={colors.white} strokeWidth={2.8} />
+              <Text style={s.addBtnText}>Add</Text>
+            </>
           )}
         </TouchableOpacity>
       </View>
 
-      {showCreate && (
-        <View style={s.createCard}>
-          <Text style={s.createTitle}>Create New User</Text>
-          {[
-            ["name", "Full Name"],
-            ["email", "Email Address"],
-            ["password", "Password"],
-            ["phone", "Phone (optional)"],
-          ].map(([field, label]) => (
-            <TextInput
-              key={field}
-              style={s.input}
-              placeholder={label}
-              placeholderTextColor={colors.textFaint}
-              value={(form as any)[field]}
-              onChangeText={(v) => setForm((p) => ({ ...p, [field]: v }))}
-              secureTextEntry={field === "password"}
-              autoCapitalize={field === "email" ? "none" : "words"}
-              keyboardType={field === "email" ? "email-address" : "default"}
-            />
-          ))}
-          {form.role === "driver" && (
-            <TextInput
-              style={s.input}
-              placeholder="Vehicle Number"
-              placeholderTextColor={colors.textFaint}
-              value={form.vehicleNumber}
-              onChangeText={(v) => setForm((p) => ({ ...p, vehicleNumber: v }))}
-              autoCapitalize="characters"
-            />
-          )}
-          <View style={s.roleRow}>
-            {["accounts", "admin", "driver"].map((r) => (
-              <TouchableOpacity
-                key={r}
-                style={[s.roleBtn, form.role === r && s.roleBtnActive]}
-                onPress={() => setForm((p) => ({ ...p, role: r }))}
-              >
-                <Text
-                  style={[
-                    s.roleBtnText,
-                    form.role === r && s.roleBtnTextActive,
-                  ]}
-                >
-                  {r}
-                </Text>
-              </TouchableOpacity>
-            ))}
-          </View>
-          <TouchableOpacity
-            style={s.createBtn}
-            onPress={handleCreate}
-            disabled={creating}
-            activeOpacity={0.85}
-          >
-            {creating ? (
-              <ActivityIndicator color={colors.white} size="small" />
-            ) : (
-              <Text style={s.createBtnText}>Create User</Text>
-            )}
-          </TouchableOpacity>
-        </View>
-      )}
+      {showCreate ? (
+        <ScrollView contentContainerStyle={s.formScroll} keyboardShouldPersistTaps="handled">
+          <View style={s.createCard}>
+            <View style={s.createHead}>
+              <View style={s.createIcon}>
+                <UserPlus size={16} color={colors.primaryDark} strokeWidth={2.3} />
+              </View>
+              <Text style={s.createTitle}>Create New User</Text>
+            </View>
 
-      {loading ? (
-        <ActivityIndicator
-          style={{ marginTop: 60 }}
-          size="large"
-          color={colors.primary}
-        />
+            <Text style={s.fieldLabel}>Role</Text>
+            <View style={s.segment}>
+              {ROLES.map((r) => {
+                const active = form.role === r;
+                return (
+                  <TouchableOpacity
+                    key={r}
+                    style={[s.segmentBtn, active && s.segmentBtnActive]}
+                    onPress={() => setForm((p) => ({ ...p, role: r }))}
+                    activeOpacity={0.85}
+                  >
+                    <Text style={[s.segmentText, active && s.segmentTextActive]}>{ROLE_LABEL[r]}</Text>
+                  </TouchableOpacity>
+                );
+              })}
+            </View>
+
+            <Text style={s.fieldLabel}>Full Name</Text>
+            <TextInput
+              style={s.input}
+              placeholder="e.g. Ravi Kumar"
+              placeholderTextColor={colors.textFaint}
+              value={form.name}
+              onChangeText={(v) => setForm((p) => ({ ...p, name: v }))}
+              autoCapitalize="words"
+            />
+
+            <Text style={s.fieldLabel}>Email Address</Text>
+            <TextInput
+              style={s.input}
+              placeholder="name@company.com"
+              placeholderTextColor={colors.textFaint}
+              value={form.email}
+              onChangeText={(v) => setForm((p) => ({ ...p, email: v }))}
+              autoCapitalize="none"
+              keyboardType="email-address"
+            />
+
+            <Text style={s.fieldLabel}>Password</Text>
+            <TextInput
+              style={s.input}
+              placeholder="Set an initial password"
+              placeholderTextColor={colors.textFaint}
+              value={form.password}
+              onChangeText={(v) => setForm((p) => ({ ...p, password: v }))}
+              secureTextEntry
+              autoCapitalize="none"
+            />
+
+            <View style={s.labelRow}>
+              <Text style={s.fieldLabel}>Phone</Text>
+              <Text style={s.optional}>Optional</Text>
+            </View>
+            <TextInput
+              style={s.input}
+              placeholder="Contact number"
+              placeholderTextColor={colors.textFaint}
+              value={form.phone}
+              onChangeText={(v) => setForm((p) => ({ ...p, phone: v }))}
+              keyboardType="phone-pad"
+            />
+
+            {form.role === "driver" && (
+              <>
+                <View style={s.labelRow}>
+                  <Text style={s.fieldLabel}>Vehicle Number</Text>
+                  <Text style={s.optional}>Optional</Text>
+                </View>
+                <View style={s.inputWithIcon}>
+                  <Truck size={15} color={colors.textMuted} strokeWidth={2.2} />
+                  <TextInput
+                    style={s.inputInner}
+                    placeholder="Can be assigned later"
+                    placeholderTextColor={colors.textFaint}
+                    value={form.vehicleNumber}
+                    onChangeText={(v) => setForm((p) => ({ ...p, vehicleNumber: v }))}
+                    autoCapitalize="characters"
+                  />
+                </View>
+              </>
+            )}
+
+            <TouchableOpacity
+              style={[s.createBtn, creating && s.createBtnDisabled]}
+              onPress={handleCreate}
+              disabled={creating}
+              activeOpacity={0.88}
+            >
+              {creating
+                ? <ActivityIndicator color={colors.white} size="small" />
+                : <Text style={s.createBtnText}>Create User</Text>}
+            </TouchableOpacity>
+          </View>
+        </ScrollView>
+      ) : loading ? (
+        <ActivityIndicator style={{ marginTop: 60 }} size="large" color={colors.primary} />
       ) : (
         <FlatList
           data={users}
           keyExtractor={(u) => u._id}
           renderItem={renderItem}
           contentContainerStyle={s.list}
+          showsVerticalScrollIndicator={false}
           refreshControl={
-            <RefreshControl
-              refreshing={refreshing}
-              onRefresh={() => {
-                setRefreshing(true);
-                load();
-              }}
-              tintColor={colors.primary}
-            />
+            <RefreshControl refreshing={refreshing} onRefresh={() => { setRefreshing(true); load(); }} tintColor={colors.primary} />
           }
           ListEmptyComponent={
-            <View style={s.empty}>
-              <Text style={s.emptyText}>No users found</Text>
-            </View>
+            <EmptyState
+              icon={<Users size={24} color={colors.primary} strokeWidth={2} />}
+              title="No users yet"
+              subtitle="Create accounts for your admin, accounts and driver staff."
+              actionLabel="Add a user"
+              onAction={() => setShowCreate(true)}
+            />
           }
         />
       )}
@@ -262,113 +317,178 @@ const s = StyleSheet.create({
   topBar: {
     flexDirection: "row",
     alignItems: "center",
-    justifyContent: "space-between",
+    gap: spacing.sm,
     paddingHorizontal: spacing.lg,
-    paddingVertical: spacing.lg,
+    paddingTop: spacing.lg,
+    paddingBottom: spacing.md,
   },
-  title: { fontFamily: fonts.extrabold, fontSize: 22, color: colors.text },
-  fab: {
-    width: 40,
-    height: 40,
-    borderRadius: 20,
-    backgroundColor: colors.primary,
-    alignItems: "center",
-    justifyContent: "center",
-    ...shadow.md,
-  },
-  createCard: {
-    backgroundColor: colors.white,
-    marginHorizontal: spacing.lg,
-    marginBottom: spacing.sm,
-    borderRadius: radius.lg,
-    padding: spacing.lg,
-    borderLeftWidth: 4,
-    borderLeftColor: colors.primary,
-    ...shadow.sm,
-  },
-  createTitle: {
-    fontFamily: fonts.bold,
-    fontSize: 15,
-    color: colors.text,
-    marginBottom: spacing.md,
-  },
-  input: {
-    borderWidth: 1.5,
-    borderColor: colors.border,
+  back: {
+    width: 34,
+    height: 34,
     borderRadius: radius.md,
-    padding: spacing.md,
-    fontFamily: fonts.regular,
-    fontSize: 14,
-    color: colors.text,
-    marginBottom: spacing.sm,
-  },
-  roleRow: { flexDirection: "row", gap: 8, marginBottom: spacing.md },
-  roleBtn: {
-    flex: 1,
-    padding: spacing.sm,
-    borderRadius: radius.sm,
+    backgroundColor: colors.surface,
     borderWidth: 1,
     borderColor: colors.border,
     alignItems: "center",
+    justifyContent: "center",
   },
-  roleBtnActive: {
+  title: { fontFamily: fonts.extrabold, fontSize: 24, letterSpacing: -0.5, color: colors.text },
+  countChip: {
+    backgroundColor: colors.primarySofter,
+    borderWidth: 1,
+    borderColor: colors.primaryBorder,
+    borderRadius: radius.full,
+    paddingHorizontal: 9,
+    paddingVertical: 2,
+  },
+  countText: { fontFamily: fonts.bold, fontSize: 11.5, color: colors.primaryDark },
+  addBtn: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 5,
     backgroundColor: colors.primary,
-    borderColor: colors.primary,
+    borderRadius: radius.full,
+    paddingHorizontal: 14,
+    paddingVertical: 8,
+    ...shadow.brand,
   },
-  roleBtnText: {
-    fontFamily: fonts.medium,
-    fontSize: 12,
+  addBtnActive: { backgroundColor: colors.surfaceAlt, borderWidth: 1, borderColor: colors.border },
+  addBtnText: { fontFamily: fonts.bold, fontSize: 13, color: colors.white },
+  addBtnTextActive: { fontFamily: fonts.bold, fontSize: 13, color: colors.textSecondary },
+
+  formScroll: { padding: spacing.lg, paddingTop: spacing.xs, paddingBottom: spacing["4xl"] },
+  createCard: {
+    backgroundColor: colors.surface,
+    borderRadius: radius.lg,
+    padding: spacing.lg,
+    borderWidth: 1,
+    borderColor: colors.borderSoft,
+    ...shadow.md,
+  },
+  createHead: { flexDirection: "row", alignItems: "center", gap: spacing.sm, marginBottom: spacing.sm },
+  createIcon: {
+    width: 32,
+    height: 32,
+    borderRadius: radius.sm,
+    backgroundColor: colors.primarySofter,
+    borderWidth: 1,
+    borderColor: colors.primaryBorder,
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  createTitle: { fontFamily: fonts.bold, fontSize: 15, color: colors.text },
+
+  labelRow: { flexDirection: "row", alignItems: "center", gap: spacing.sm },
+  fieldLabel: {
+    fontFamily: fonts.semibold,
+    fontSize: 11.5,
     color: colors.textSecondary,
+    marginTop: spacing.md,
+    marginBottom: 6,
   },
-  roleBtnTextActive: { color: colors.white, fontFamily: fonts.bold },
+  optional: {
+    fontFamily: fonts.medium,
+    fontSize: 10.5,
+    color: colors.textFaint,
+    backgroundColor: colors.surfaceAlt,
+    borderRadius: radius.full,
+    paddingHorizontal: 7,
+    paddingVertical: 1,
+    marginTop: spacing.md,
+    marginBottom: 6,
+  },
+  input: {
+    borderWidth: 1,
+    borderColor: colors.border,
+    borderRadius: radius.md,
+    paddingHorizontal: spacing.md,
+    paddingVertical: 12,
+    fontFamily: fonts.medium,
+    fontSize: 14,
+    color: colors.text,
+    backgroundColor: colors.bgMuted,
+  },
+  inputWithIcon: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: spacing.sm,
+    borderWidth: 1,
+    borderColor: colors.border,
+    borderRadius: radius.md,
+    paddingHorizontal: spacing.md,
+    backgroundColor: colors.bgMuted,
+  },
+  inputInner: {
+    flex: 1,
+    paddingVertical: 12,
+    fontFamily: fonts.medium,
+    fontSize: 14,
+    letterSpacing: 0.4,
+    color: colors.text,
+  },
+
+  segment: {
+    flexDirection: "row",
+    gap: 4,
+    padding: 3,
+    backgroundColor: colors.surfaceAlt,
+    borderRadius: radius.md,
+  },
+  segmentBtn: { flex: 1, alignItems: "center", paddingVertical: 9, borderRadius: radius.sm },
+  segmentBtnActive: { backgroundColor: colors.primary },
+  segmentText: { fontFamily: fonts.semibold, fontSize: 12.5, color: colors.textMuted },
+  segmentTextActive: { color: colors.white, fontFamily: fonts.bold },
+
   createBtn: {
     backgroundColor: colors.primary,
     borderRadius: radius.md,
     paddingVertical: 14,
     alignItems: "center",
-    ...shadow.sm,
+    marginTop: spacing.xl,
+    ...shadow.brand,
   },
+  createBtnDisabled: { opacity: 0.7 },
   createBtnText: { fontFamily: fonts.bold, fontSize: 15, color: colors.white },
-  list: { padding: spacing.lg },
+
+  list: { padding: spacing.lg, paddingTop: spacing.xs, paddingBottom: spacing["4xl"] },
   card: {
     flexDirection: "row",
     alignItems: "center",
-    justifyContent: "space-between",
-    backgroundColor: colors.white,
+    gap: spacing.md,
+    backgroundColor: colors.surface,
     borderRadius: radius.lg,
-    padding: spacing.lg,
+    padding: spacing.md,
     marginBottom: spacing.sm,
-    borderLeftWidth: 4,
-    borderLeftColor: colors.primary,
+    borderWidth: 1,
+    borderColor: colors.borderSoft,
     ...shadow.sm,
   },
-  cardLeft: { flexDirection: "row", alignItems: "center", gap: 12, flex: 1 },
+  cardInactive: { opacity: 0.7 },
   avatar: {
-    width: 40,
-    height: 40,
-    borderRadius: 20,
+    width: 44,
+    height: 44,
+    borderRadius: 22,
+    borderWidth: 1,
     alignItems: "center",
     justifyContent: "center",
   },
-  name: { fontFamily: fonts.semibold, fontSize: 14, color: colors.text },
-  email: {
-    fontFamily: fonts.regular,
-    fontSize: 12,
-    color: colors.textSecondary,
-    marginTop: 1,
-  },
+  avatarText: { fontFamily: fonts.extrabold, fontSize: 15, letterSpacing: 0.3 },
+  cardMid: { flex: 1, gap: 3 },
+  name: { fontFamily: fonts.bold, fontSize: 14.5, letterSpacing: -0.1, color: colors.text },
+  email: { fontFamily: fonts.regular, fontSize: 12, color: colors.textMuted },
   roleBadge: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 5,
+    alignSelf: "flex-start",
+    borderWidth: 1,
+    borderRadius: radius.full,
     paddingHorizontal: 8,
     paddingVertical: 2,
-    borderRadius: 4,
-    marginTop: 4,
-    alignSelf: "flex-start",
+    marginTop: 2,
   },
-  roleText: { fontFamily: fonts.bold, fontSize: 10, letterSpacing: 0.5 },
-  empty: { alignItems: "center", paddingTop: 80 },
-  emptyText: {
-    fontFamily: fonts.medium,
-    fontSize: 14,
-    color: colors.textFaint,
-  },
+  roleDot: { width: 5, height: 5, borderRadius: 3 },
+  roleText: { fontFamily: fonts.semibold, fontSize: 10.5 },
+  cardRight: { alignItems: "center", gap: 2 },
+  switchLabel: { fontFamily: fonts.semibold, fontSize: 10, color: colors.textFaint },
 });

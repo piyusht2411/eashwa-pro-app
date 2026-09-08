@@ -24,16 +24,44 @@ type NotificationType =
   | 'pdi_verified_admin'
   | 'payment_made';
 
-function buildNotificationRoute(data: Record<string, any>): string {
-  const type = data?.type as NotificationType | undefined;
-  if (!type) return '/';
+// Transport-portal notifications are not rendered by /notification-detail
+// (that screen only knows production entities). They carry a visitId instead.
+const TRANSPORT_TYPES = [
+  'new_visit',
+  'visit_created',
+  'visit_updated',
+  'expense_approved',
+  'expense_rejected',
+  'approval_required',
+];
 
-  // Build query string from available IDs
-  const params = new URLSearchParams({ type });
-  if (data.logId) params.set('logId', data.logId);
-  if (data.containerId) params.set('containerId', data.containerId);
+const PRODUCTION_TYPES: NotificationType[] = [
+  'new_container',
+  'new_production_log',
+  'pdi_verified',
+  'pdi_incomplete',
+  'pdi_verified_admin',
+  'payment_made',
+];
 
-  return `/notification-detail?${params.toString()}`;
+/** Returns the route to open, or null when there is nothing safe to open. */
+function buildNotificationRoute(data: Record<string, any>): string | null {
+  const type = data?.type as string | undefined;
+  if (!type) return null;
+
+  if (PRODUCTION_TYPES.includes(type as NotificationType)) {
+    const params = new URLSearchParams({ type });
+    if (data.logId) params.set('logId', data.logId);
+    if (data.containerId) params.set('containerId', data.containerId);
+    return `/notification-detail?${params.toString()}`;
+  }
+
+  // Transport: fall back to the in-app notifications list, which every
+  // transport role can render. Sending these to /notification-detail only
+  // produced an "Unknown notification type" dead end.
+  if (TRANSPORT_TYPES.includes(type)) return '/notifications';
+
+  return null;
 }
 
 // ─── Configure foreground notification behaviour ─────────────────────────────
@@ -90,11 +118,19 @@ export async function getFCMToken(): Promise<string | null> {
 
 function handleNotificationNavigation(data: Record<string, any>): void {
   const route = buildNotificationRoute(data);
+  if (!route) {
+    console.log('[Notifications] No route for notification:', data?.type);
+    return;
+  }
   console.log('[Notifications] Navigating to:', route);
 
   // Small delay to let the app finish mounting if navigating on cold start
   setTimeout(() => {
-    router.push(route as any);
+    try {
+      router.push(route as any);
+    } catch (err) {
+      console.error('[Notifications] Navigation failed:', err);
+    }
   }, 500);
 }
 

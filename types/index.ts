@@ -93,7 +93,8 @@ export type ExpenseStatus = 'pending' | 'approved' | 'rejected' | 'auto_approved
 export interface Driver {
   _id: string;
   name: string;
-  vehicleNumber: string;
+  /** Optional — a driver may be added before a vehicle is assigned. */
+  vehicleNumber?: string;
   userId: string | null;
   isActive: boolean;
   createdAt?: string;
@@ -104,7 +105,10 @@ export interface DriverSummary {
   summary: {
     totalVisits: number;
     totalDistance: number;
+    /** Approved / auto-approved amounts only. */
     totalExpense: number;
+    /** Amount still awaiting approval — excluded from totalExpense. */
+    pendingExpense: number;
     approvedReimbursement: number;
     pendingReimbursement: number;
     rejectedAmount: number;
@@ -148,7 +152,10 @@ export interface Expense {
   food: ExpenseItem;
   cng: ExpenseItem;
   other: ExpenseItem & { description: string };
+  /** Approved / auto-approved amounts only. */
   totalExpense: number;
+  /** Amount still awaiting approval — excluded from totalExpense. */
+  pendingExpense: number;
   pendingReimbursement: number;
   approvedReimbursement: number;
   rejectedAmount: number;
@@ -160,7 +167,10 @@ export interface AdminDashboardStats {
   totalDrivers: number;
   totalVisits: number;
   totalDistance: number;
+  /** Approved / auto-approved amounts only. */
   totalExpense: number;
+  /** Amount still awaiting approval — excluded from totalExpense. */
+  pendingExpense: number;
   pendingReimbursements: number;
   approvedReimbursements: number;
   pendingApprovals: number;
@@ -176,7 +186,12 @@ export interface AccountsDashboard {
   stats: {
     totalDrivers: number;
     totalVisits: number;
+    /** Approved / auto-approved amounts only. */
     totalExpense: number;
+    /** Amount still awaiting approval — excluded from totalExpense. */
+    pendingExpense: number;
+    pendingReimbursements: number;
+    approvedReimbursements: number;
     pendingApprovals: number;
   };
   recentVisits: Visit[];
@@ -187,7 +202,10 @@ export interface DriverDashboard {
   stats: {
     totalVisits: number;
     totalDistance: number;
+    /** Approved / auto-approved amounts only. */
     totalExpense: number;
+    /** Amount still awaiting approval — excluded from totalExpense. */
+    pendingExpense: number;
     approvedReimbursements: number;
     pendingBalance: number;
   };

@@ -1012,7 +1012,7 @@ export const createUser = (
   );
 
 export const createDriver = (
-  data: { name: string; vehicleNumber: string; userId?: string | null },
+  data: { name: string; vehicleNumber?: string; userId?: string | null },
   token: string,
 ) =>
   apiFetch<{ message: string; driver: Driver }>(
@@ -1230,8 +1230,12 @@ export const getVisitReport = (
     totals: {
       totalVisits: number;
       totalDistance: number;
+      /** Approved / auto-approved amounts only. */
       totalExpense: number;
+      /** Amount still awaiting approval — excluded from totalExpense. */
+      pendingExpense: number;
       pendingReimbursement: number;
       approvedReimbursement: number;
+      rejectedAmount: number;
     };
   }>(`/reports/visits${transportQuery(params)}`, {}, token);

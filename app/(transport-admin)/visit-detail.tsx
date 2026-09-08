@@ -11,12 +11,28 @@ import {
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { router, useLocalSearchParams } from 'expo-router';
 import { LinearGradient } from 'expo-linear-gradient';
-import { ArrowLeft, CheckCircle, XCircle, Clock, Building2, User } from 'lucide-react-native';
+import {
+  ArrowLeft,
+  Building2,
+  CalendarDays,
+  Check,
+  FileText,
+  Gauge,
+  MapPin,
+  Package,
+  Truck,
+  User,
+  X,
+} from 'lucide-react-native';
 
 import { getVisitById, approveExpenseItem, rejectExpenseItem } from '@/lib/api';
+import RejectReasonModal from '@/components/ui/RejectReasonModal';
+import StatusPill from '@/components/ui/StatusPill';
+import ExpenseTypeBadge from '@/components/ui/ExpenseTypeBadge';
 import { useAuthStore } from '@/stores/authStore';
-import { colors, fonts, radius, shadow, spacing } from '@/lib/theme';
-import type { Expense, ExpenseItem, ExpenseStatus, Visit } from '@/types';
+import { colors, fonts, gradients, radius, shadow, spacing } from '@/lib/theme';
+import { formatCount, formatDate, formatDays, formatINR, formatKm } from '@/lib/format';
+import type { Expense, ExpenseItem, Visit } from '@/types';
 
 type ExpenseType = 'food' | 'cng' | 'other';
 
@@ -26,6 +42,8 @@ export default function AdminVisitDetailScreen() {
   const [visit, setVisit] = useState<Visit | null>(null);
   const [expense, setExpense] = useState<Expense | null>(null);
   const [loading, setLoading] = useState(true);
+  const [rejectTarget, setRejectTarget] = useState<ExpenseType | null>(null);
+  const [rejecting, setRejecting] = useState(false);
 
   const load = useCallback(async () => {
     if (!token || !id) return;
@@ -54,176 +72,227 @@ export default function AdminVisitDetailScreen() {
     ]);
   };
 
-  const handleReject = async (type: ExpenseType) => {
+  const handleReject = (type: ExpenseType) => {
     if (!token || !expense) return;
-    Alert.prompt('Reject Expense', `Enter reason for rejecting ${type} expense:`, [
-      { text: 'Cancel', style: 'cancel' },
-      {
-        text: 'Reject',
-        style: 'destructive',
-        onPress: async (remark: string | undefined) => {
-          if (!remark?.trim()) { Alert.alert('Required', 'Please enter a reason.'); return; }
-          try {
-            await rejectExpenseItem(expense._id, type, remark, token);
-            load();
-          } catch (e: any) { Alert.alert('Error', e.message); }
-        },
-      },
-    ]);
+    setRejectTarget(type);
   };
 
-  if (loading) return <SafeAreaView style={s.centered}><ActivityIndicator size="large" color={colors.primary} /></SafeAreaView>;
-  if (!visit) return <SafeAreaView style={s.centered}><Text>Visit not found</Text></SafeAreaView>;
+  const submitReject = async (remark: string) => {
+    if (!token || !expense || !rejectTarget) return;
+    setRejecting(true);
+    try {
+      await rejectExpenseItem(expense._id, rejectTarget, remark, token);
+      setRejectTarget(null);
+      load();
+    } catch (e: any) {
+      Alert.alert('Error', e.message);
+    } finally {
+      setRejecting(false);
+    }
+  };
+
+  if (loading) {
+    return (
+      <SafeAreaView style={s.centered}>
+        <ActivityIndicator size="large" color={colors.primary} />
+      </SafeAreaView>
+    );
+  }
+  if (!visit) {
+    return (
+      <SafeAreaView style={s.centered}>
+        <Text style={s.notFound}>Visit not found</Text>
+      </SafeAreaView>
+    );
+  }
 
   const driver = typeof visit.driver === 'object' ? visit.driver : null;
 
   return (
     <SafeAreaView style={s.root} edges={['top']}>
-      <LinearGradient colors={[colors.primaryLight, colors.primary, colors.primaryDark]} style={s.header}>
-        <TouchableOpacity style={s.back} onPress={() => router.back()}>
-          <ArrowLeft size={22} color={colors.white} />
-        </TouchableOpacity>
-        <Text style={s.headerTitle}>Visit Details</Text>
+      <LinearGradient colors={gradients.brandDeep} start={{ x: 0, y: 0 }} end={{ x: 1, y: 1 }} style={s.header}>
+        <View style={s.headerBar}>
+          <TouchableOpacity style={s.back} onPress={() => router.back()} hitSlop={8}>
+            <ArrowLeft size={20} color={colors.white} strokeWidth={2.4} />
+          </TouchableOpacity>
+          <Text style={s.headerTitle}>Visit Details</Text>
+        </View>
+
+        <Text style={s.headerDest} numberOfLines={1}>{visit.destination}</Text>
+        <View style={s.headerMeta}>
+          <View style={s.headerChip}>
+            <Truck size={12} color={colors.white} strokeWidth={2.3} />
+            <Text style={s.headerChipText}>{visit.vehicleNumber || 'No vehicle'}</Text>
+          </View>
+          <View style={s.headerChip}>
+            <User size={12} color={colors.white} strokeWidth={2.3} />
+            <Text style={s.headerChipText} numberOfLines={1}>{driver?.name ?? '—'}</Text>
+          </View>
+        </View>
       </LinearGradient>
 
       <ScrollView contentContainerStyle={s.body} showsVerticalScrollIndicator={false}>
-        {/* Visit Info */}
-        <View style={s.section}>
-          <Text style={s.sectionTitle}>Visit Information</Text>
-          <InfoRow label="Driver" value={driver?.name ?? '—'} />
-          <InfoRow label="Vehicle" value={visit.vehicleNumber} />
-          <InfoRow label="Destination" value={visit.destination} />
-          <InfoRow label="Start Date" value={new Date(visit.startDate).toLocaleDateString('en-IN')} />
-          <InfoRow label="End Date" value={new Date(visit.endDate).toLocaleDateString('en-IN')} />
-          <InfoRow label="Total Days" value={`${visit.totalDays} days`} />
-          <InfoRow label="Distance" value={`${visit.distance} km`} />
-          <InfoRow label="Quantity" value={`${visit.quantity}`} />
-          {visit.billNumber ? <InfoRow label="Bill No." value={visit.billNumber} /> : null}
+        {/* Trip facts as a tile row — far more scannable than a label/value list. */}
+        <View style={s.factRow}>
+          <Fact icon={<CalendarDays size={15} color={colors.primaryDark} strokeWidth={2.3} />} value={formatDays(visit.totalDays)} label="Duration" />
+          <Fact icon={<Gauge size={15} color={colors.info} strokeWidth={2.3} />} value={formatKm(visit.distance)} label="Distance" />
+          <Fact icon={<Package size={15} color={colors.success} strokeWidth={2.3} />} value={formatCount(visit.quantity)} label="Quantity" />
         </View>
 
-        {/* Expense */}
-        {expense ? (
-          <View style={s.section}>
-            <Text style={s.sectionTitle}>Expenses</Text>
-            <ExpenseCard
-              label="Food"
-              type="food"
-              item={expense.food}
-              maxAllowed={400 * visit.totalDays}
-              onApprove={() => handleApprove('food')}
-              onReject={() => handleReject('food')}
-            />
-            <ExpenseCard
-              label="CNG"
-              type="cng"
-              item={expense.cng}
-              onApprove={() => handleApprove('cng')}
-              onReject={() => handleReject('cng')}
-            />
-            <ExpenseCard
-              label="Other"
-              type="other"
-              item={expense.other}
-              onApprove={() => handleApprove('other')}
-              onReject={() => handleReject('other')}
-            />
+        <View style={s.section}>
+          <Text style={s.sectionTitle}>Visit Information</Text>
+          <InfoRow icon={<MapPin size={14} color={colors.textMuted} />} label="Destination" value={visit.destination} />
+          <InfoRow icon={<CalendarDays size={14} color={colors.textMuted} />} label="Start Date" value={formatDate(visit.startDate)} />
+          <InfoRow icon={<CalendarDays size={14} color={colors.textMuted} />} label="End Date" value={formatDate(visit.endDate)} />
+          {visit.billNumber ? (
+            <InfoRow icon={<FileText size={14} color={colors.textMuted} />} label="Bill No." value={visit.billNumber} last />
+          ) : null}
+        </View>
 
-            {/* Totals */}
-            <View style={s.totals}>
-              <TotalRow label="Total Expense" value={expense.totalExpense} color={colors.text} />
-              <TotalRow label="Pending Reimb." value={expense.pendingReimbursement} color={colors.warning} />
-              <TotalRow label="Approved Reimb." value={expense.approvedReimbursement} color={colors.success} />
-              <TotalRow label="Rejected Amt." value={expense.rejectedAmount} color={colors.danger} />
+        {expense ? (
+          <>
+            <View style={s.section}>
+              <Text style={s.sectionTitle}>Expenses</Text>
+              <ExpenseCard
+                type="food"
+                item={expense.food}
+                maxAllowed={400 * visit.totalDays}
+                onApprove={() => handleApprove('food')}
+                onReject={() => handleReject('food')}
+              />
+              <ExpenseCard
+                type="cng"
+                item={expense.cng}
+                onApprove={() => handleApprove('cng')}
+                onReject={() => handleReject('cng')}
+              />
+              <ExpenseCard
+                type="other"
+                item={expense.other}
+                onApprove={() => handleApprove('other')}
+                onReject={() => handleReject('other')}
+                last
+              />
             </View>
-          </View>
+
+            <View style={s.section}>
+              <Text style={s.sectionTitle}>Summary</Text>
+              <TotalRow label="Total Expense (approved)" value={expense.totalExpense} color={colors.text} strong />
+              {expense.pendingExpense > 0 ? (
+                <TotalRow label="Awaiting Approval" value={expense.pendingExpense} color={colors.warning} />
+              ) : null}
+              <TotalRow label="Pending Reimbursement" value={expense.pendingReimbursement} color={colors.warning} />
+              <TotalRow label="Approved Reimbursement" value={expense.approvedReimbursement} color={colors.success} />
+              <TotalRow label="Rejected Amount" value={expense.rejectedAmount} color={colors.danger} last />
+            </View>
+          </>
         ) : (
           <View style={s.section}>
             <Text style={s.emptyText}>No expenses recorded for this visit.</Text>
           </View>
         )}
       </ScrollView>
+
+      <RejectReasonModal
+        visible={rejectTarget !== null}
+        message={rejectTarget ? `Enter reason for rejecting ${rejectTarget} expense:` : undefined}
+        submitting={rejecting}
+        onCancel={() => setRejectTarget(null)}
+        onSubmit={submitReject}
+      />
     </SafeAreaView>
   );
 }
 
-function InfoRow({ label, value }: { label: string; value: string }) {
+function Fact({ icon, value, label }: { icon: React.ReactNode; value: string; label: string }) {
   return (
-    <View style={s.infoRow}>
-      <Text style={s.infoLabel}>{label}</Text>
-      <Text style={s.infoValue}>{value}</Text>
+    <View style={s.fact}>
+      {icon}
+      <Text style={s.factValue} numberOfLines={1} adjustsFontSizeToFit minimumFontScale={0.8}>{value}</Text>
+      <Text style={s.factLabel}>{label}</Text>
     </View>
   );
 }
 
-function TotalRow({ label, value, color }: { label: string; value: number; color: string }) {
+function InfoRow({
+  icon, label, value, last,
+}: { icon?: React.ReactNode; label: string; value: string; last?: boolean }) {
   return (
-    <View style={s.totalRow}>
-      <Text style={s.totalLabel}>{label}</Text>
-      <Text style={[s.totalValue, { color }]}>₹{value.toLocaleString('en-IN')}</Text>
+    <View style={[s.infoRow, last && s.rowLast]}>
+      <View style={s.infoLabelWrap}>
+        {icon}
+        <Text style={s.infoLabel}>{label}</Text>
+      </View>
+      <Text style={s.infoValue} numberOfLines={1}>{value}</Text>
     </View>
   );
 }
 
-function StatusBadge({ status }: { status: ExpenseStatus }) {
-  const map: Record<ExpenseStatus, { bg: string; text: string; label: string }> = {
-    pending: { bg: colors.warningSoft, text: colors.warning, label: 'Pending' },
-    approved: { bg: colors.successSoft, text: colors.success, label: 'Approved' },
-    rejected: { bg: colors.dangerSoft, text: colors.danger, label: 'Rejected' },
-    auto_approved: { bg: colors.infoSoft, text: colors.info, label: 'Auto Approved' },
-  };
-  const c = map[status];
+function TotalRow({
+  label, value, color, strong, last,
+}: { label: string; value: number; color: string; strong?: boolean; last?: boolean }) {
   return (
-    <View style={[s.badge, { backgroundColor: c.bg }]}>
-      <Text style={[s.badgeText, { color: c.text }]}>{c.label}</Text>
+    <View style={[s.totalRow, last && s.rowLast]}>
+      <Text style={[s.totalLabel, strong && s.totalLabelStrong]}>{label}</Text>
+      <Text style={[s.totalValue, { color }, strong && s.totalValueStrong]}>{formatINR(value)}</Text>
     </View>
   );
 }
 
 function ExpenseCard({
-  label, type, item, maxAllowed, onApprove, onReject,
+  type, item, maxAllowed, onApprove, onReject, last,
 }: {
-  label: string; type: ExpenseType; item: ExpenseItem; maxAllowed?: number;
-  onApprove: () => void; onReject: () => void;
+  type: ExpenseType; item: ExpenseItem; maxAllowed?: number;
+  onApprove: () => void; onReject: () => void; last?: boolean;
 }) {
   const isPending = item.status === 'pending' && item.paidBy === 'driver';
+  const overLimit = maxAllowed !== undefined && item.amount > maxAllowed;
+
   return (
-    <View style={s.expenseCard}>
+    <View style={[s.expenseCard, last && { marginBottom: 0 }]}>
       <View style={s.expenseHeader}>
-        <View>
-          <Text style={s.expenseLabel}>{label} Expense</Text>
-          {item.paidBy === 'company' ? (
-            <View style={s.paidByRow}><Building2 size={12} color={colors.info} /><Text style={s.paidByText}>Company (Amit)</Text></View>
-          ) : (
-            <View style={s.paidByRow}><User size={12} color={colors.textMuted} /><Text style={s.paidByText}>Driver</Text></View>
-          )}
-        </View>
-        <View style={{ alignItems: 'flex-end' }}>
-          <Text style={s.expenseAmount}>₹{item.amount.toLocaleString('en-IN')}</Text>
-          <StatusBadge status={item.status} />
+        <ExpenseTypeBadge type={type} />
+        <Text style={s.expenseAmount}>{formatINR(item.amount)}</Text>
+      </View>
+
+      <View style={s.expenseMeta}>
+        <StatusPill status={item.status} />
+        <View style={s.paidByChip}>
+          {item.paidBy === 'company'
+            ? <Building2 size={11} color={colors.info} strokeWidth={2.3} />
+            : <User size={11} color={colors.textMuted} strokeWidth={2.3} />}
+          <Text style={[s.paidByText, item.paidBy === 'company' && { color: colors.info }]}>
+            {item.paidBy === 'company' ? 'Company' : 'Driver paid'}
+          </Text>
         </View>
       </View>
 
-      {maxAllowed !== undefined && (
-        <Text style={s.maxNote}>Max allowed: ₹{maxAllowed.toLocaleString('en-IN')}</Text>
-      )}
+      {maxAllowed !== undefined ? (
+        <Text style={[s.maxNote, overLimit && s.maxNoteOver]}>
+          {overLimit ? '⚠ Over limit · ' : ''}Max allowed {formatINR(maxAllowed)}
+        </Text>
+      ) : null}
 
       {(item as any).description ? (
-        <Text style={s.desc}>Note: {(item as any).description}</Text>
+        <Text style={s.desc}>{(item as any).description}</Text>
       ) : null}
 
       {item.rejectionRemark ? (
-        <Text style={s.remark}>❌ Remark: {item.rejectionRemark}</Text>
+        <View style={s.remarkBox}>
+          <Text style={s.remarkLabel}>Rejection reason</Text>
+          <Text style={s.remarkText}>{item.rejectionRemark}</Text>
+        </View>
       ) : null}
 
       {isPending && (
         <View style={s.actionRow}>
-          <TouchableOpacity style={s.approveBtn} onPress={onApprove} activeOpacity={0.85}>
-            <CheckCircle size={15} color={colors.white} />
-            <Text style={s.actionText}>Approve</Text>
-          </TouchableOpacity>
           <TouchableOpacity style={s.rejectBtn} onPress={onReject} activeOpacity={0.85}>
-            <XCircle size={15} color={colors.white} />
-            <Text style={s.actionText}>Reject</Text>
+            <X size={15} color={colors.danger} strokeWidth={3} />
+            <Text style={s.rejectText}>Reject</Text>
+          </TouchableOpacity>
+          <TouchableOpacity style={s.approveBtn} onPress={onApprove} activeOpacity={0.85}>
+            <Check size={15} color={colors.white} strokeWidth={3} />
+            <Text style={s.approveText}>Approve</Text>
           </TouchableOpacity>
         </View>
       )}
@@ -233,34 +302,166 @@ function ExpenseCard({
 
 const s = StyleSheet.create({
   root: { flex: 1, backgroundColor: colors.bgSubtle },
-  centered: { flex: 1, alignItems: 'center', justifyContent: 'center' },
-  header: { flexDirection: 'row', alignItems: 'center', paddingHorizontal: spacing.lg, paddingVertical: spacing.lg, gap: 12 },
-  back: { padding: 4 },
-  headerTitle: { fontFamily: fonts.bold, fontSize: 18, color: colors.white },
-  body: { padding: spacing.lg, paddingBottom: 40 },
-  section: { backgroundColor: colors.white, borderRadius: radius.lg, padding: spacing.lg, marginBottom: spacing.md, borderLeftWidth: 4, borderLeftColor: colors.primary, ...shadow.sm },
-  sectionTitle: { fontFamily: fonts.bold, fontSize: 15, color: colors.text, marginBottom: spacing.md, borderBottomWidth: 1, borderBottomColor: colors.border, paddingBottom: spacing.sm },
-  infoRow: { flexDirection: 'row', justifyContent: 'space-between', paddingVertical: 6, borderBottomWidth: 1, borderBottomColor: colors.borderSoft },
+  centered: { flex: 1, alignItems: 'center', justifyContent: 'center', backgroundColor: colors.bgSubtle },
+  notFound: { fontFamily: fonts.medium, fontSize: 15, color: colors.textMuted },
+
+  header: {
+    paddingHorizontal: spacing.lg,
+    paddingTop: spacing.md,
+    paddingBottom: spacing.xl,
+    borderBottomLeftRadius: radius['2xl'],
+    borderBottomRightRadius: radius['2xl'],
+  },
+  headerBar: { flexDirection: 'row', alignItems: 'center', gap: spacing.md },
+  back: {
+    width: 36,
+    height: 36,
+    borderRadius: radius.md,
+    backgroundColor: 'rgba(255,255,255,0.2)',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  headerTitle: { fontFamily: fonts.semibold, fontSize: 14, color: 'rgba(255,255,255,0.9)', letterSpacing: 0.2 },
+  headerDest: { fontFamily: fonts.extrabold, fontSize: 23, letterSpacing: -0.4, color: colors.white, marginTop: spacing.lg },
+  headerMeta: { flexDirection: 'row', gap: spacing.sm, marginTop: spacing.md },
+  headerChip: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 5,
+    maxWidth: '52%',
+    backgroundColor: 'rgba(255,255,255,0.18)',
+    borderRadius: radius.full,
+    paddingHorizontal: 10,
+    paddingVertical: 5,
+  },
+  headerChipText: { fontFamily: fonts.semibold, fontSize: 11.5, color: colors.white },
+
+  body: { padding: spacing.lg, paddingBottom: spacing['4xl'] },
+
+  factRow: { flexDirection: 'row', gap: spacing.sm, marginBottom: spacing.md },
+  fact: {
+    flex: 1,
+    alignItems: 'center',
+    gap: 5,
+    backgroundColor: colors.surface,
+    borderRadius: radius.lg,
+    paddingVertical: spacing.md,
+    paddingHorizontal: spacing.sm,
+    borderWidth: 1,
+    borderColor: colors.borderSoft,
+    ...shadow.sm,
+  },
+  factValue: { fontFamily: fonts.bold, fontSize: 14, letterSpacing: -0.2, color: colors.text },
+  factLabel: { fontFamily: fonts.medium, fontSize: 10.5, color: colors.textFaint },
+
+  section: {
+    backgroundColor: colors.surface,
+    borderRadius: radius.lg,
+    padding: spacing.lg,
+    marginBottom: spacing.md,
+    borderWidth: 1,
+    borderColor: colors.borderSoft,
+    ...shadow.sm,
+  },
+  sectionTitle: {
+    fontFamily: fonts.bold,
+    fontSize: 15,
+    letterSpacing: -0.2,
+    color: colors.text,
+    marginBottom: spacing.md,
+  },
+
+  infoRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    gap: spacing.md,
+    paddingVertical: 9,
+    borderBottomWidth: 1,
+    borderBottomColor: colors.borderSoft,
+  },
+  rowLast: { borderBottomWidth: 0, paddingBottom: 0 },
+  infoLabelWrap: { flexDirection: 'row', alignItems: 'center', gap: 6 },
   infoLabel: { fontFamily: fonts.medium, fontSize: 13, color: colors.textMuted },
-  infoValue: { fontFamily: fonts.semibold, fontSize: 13, color: colors.text },
-  expenseCard: { borderWidth: 1, borderColor: colors.border, borderRadius: radius.md, padding: spacing.md, marginBottom: spacing.sm },
-  expenseHeader: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'flex-start' },
-  expenseLabel: { fontFamily: fonts.semibold, fontSize: 14, color: colors.text },
-  expenseAmount: { fontFamily: fonts.extrabold, fontSize: 18, color: colors.text },
-  paidByRow: { flexDirection: 'row', alignItems: 'center', gap: 4, marginTop: 3 },
-  paidByText: { fontFamily: fonts.medium, fontSize: 11, color: colors.textMuted },
-  badge: { paddingHorizontal: 8, paddingVertical: 2, borderRadius: 4, marginTop: 4 },
-  badgeText: { fontFamily: fonts.semibold, fontSize: 11 },
-  maxNote: { fontFamily: fonts.medium, fontSize: 11, color: colors.textMuted, marginTop: 6 },
-  desc: { fontFamily: fonts.regular, fontSize: 12, color: colors.textSecondary, marginTop: 4 },
-  remark: { fontFamily: fonts.medium, fontSize: 12, color: colors.danger, marginTop: 4 },
-  actionRow: { flexDirection: 'row', gap: 10, marginTop: spacing.sm },
-  approveBtn: { flex: 1, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 6, backgroundColor: colors.success, borderRadius: radius.sm, paddingVertical: 9 },
-  rejectBtn: { flex: 1, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 6, backgroundColor: colors.danger, borderRadius: radius.sm, paddingVertical: 9 },
-  actionText: { fontFamily: fonts.bold, fontSize: 13, color: colors.white },
-  totals: { borderTopWidth: 1, borderTopColor: colors.border, paddingTop: spacing.md, marginTop: spacing.sm },
-  totalRow: { flexDirection: 'row', justifyContent: 'space-between', paddingVertical: 4 },
+  infoValue: { flexShrink: 1, fontFamily: fonts.semibold, fontSize: 13, color: colors.text, textAlign: 'right' },
+
+  expenseCard: {
+    borderWidth: 1,
+    borderColor: colors.border,
+    borderRadius: radius.md,
+    padding: spacing.md,
+    marginBottom: spacing.sm,
+    backgroundColor: colors.bgMuted,
+  },
+  expenseHeader: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: spacing.sm },
+  expenseAmount: { fontFamily: fonts.extrabold, fontSize: 19, letterSpacing: -0.4, color: colors.text },
+  expenseMeta: { flexDirection: 'row', alignItems: 'center', gap: spacing.sm, marginTop: spacing.md },
+  paidByChip: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+    backgroundColor: colors.surface,
+    borderWidth: 1,
+    borderColor: colors.border,
+    borderRadius: radius.full,
+    paddingHorizontal: 8,
+    paddingVertical: 3,
+  },
+  paidByText: { fontFamily: fonts.semibold, fontSize: 10.5, color: colors.textMuted },
+
+  maxNote: { fontFamily: fonts.medium, fontSize: 11.5, color: colors.textMuted, marginTop: spacing.sm },
+  maxNoteOver: { color: colors.danger, fontFamily: fonts.semibold },
+  desc: { fontFamily: fonts.regular, fontSize: 12.5, lineHeight: 18, color: colors.textSecondary, marginTop: 6 },
+
+  remarkBox: {
+    backgroundColor: colors.dangerSoft,
+    borderWidth: 1,
+    borderColor: colors.dangerBorder,
+    borderRadius: radius.sm,
+    padding: spacing.sm,
+    marginTop: spacing.sm,
+  },
+  remarkLabel: { fontFamily: fonts.bold, fontSize: 10, letterSpacing: 0.6, textTransform: 'uppercase', color: colors.danger },
+  remarkText: { fontFamily: fonts.medium, fontSize: 12.5, lineHeight: 18, color: colors.text, marginTop: 3 },
+
+  actionRow: { flexDirection: 'row', gap: spacing.sm, marginTop: spacing.md },
+  rejectBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 5,
+    flex: 1,
+    height: 40,
+    borderRadius: radius.md,
+    backgroundColor: colors.surface,
+    borderWidth: 1,
+    borderColor: colors.dangerBorder,
+  },
+  rejectText: { fontFamily: fonts.bold, fontSize: 13, color: colors.danger },
+  approveBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 5,
+    flex: 1,
+    height: 40,
+    borderRadius: radius.md,
+    backgroundColor: colors.success,
+  },
+  approveText: { fontFamily: fonts.bold, fontSize: 13, color: colors.white },
+
+  totalRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    paddingVertical: 9,
+    borderBottomWidth: 1,
+    borderBottomColor: colors.borderSoft,
+  },
   totalLabel: { fontFamily: fonts.medium, fontSize: 13, color: colors.textSecondary },
-  totalValue: { fontFamily: fonts.bold, fontSize: 13 },
-  emptyText: { fontFamily: fonts.medium, fontSize: 14, color: colors.textFaint, textAlign: 'center', paddingVertical: 20 },
+  totalLabelStrong: { fontFamily: fonts.bold, color: colors.text },
+  totalValue: { fontFamily: fonts.bold, fontSize: 14 },
+  totalValueStrong: { fontFamily: fonts.extrabold, fontSize: 17, letterSpacing: -0.3 },
+
+  emptyText: { fontFamily: fonts.medium, fontSize: 13.5, color: colors.textFaint, textAlign: 'center', paddingVertical: spacing.lg },
 });

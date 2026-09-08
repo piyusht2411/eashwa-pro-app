@@ -1,33 +1,18 @@
 import { Tabs } from 'expo-router';
-import { BarChart2, Bell, Home, Truck, MoreHorizontal } from 'lucide-react-native';
-import { Platform, StyleSheet } from 'react-native';
+import { BarChart3, CircleCheckBig, LayoutDashboard, Menu, Route } from 'lucide-react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import { colors, fonts } from '@/lib/theme';
+
+import { tabIcon, tabScreenOptions } from '@/components/layout/tabBar';
 
 export default function AdminLayout() {
   const insets = useSafeAreaInsets();
   return (
-    <Tabs
-      screenOptions={{
-        headerShown: false,
-        tabBarStyle: {
-          ...s.tabBar,
-          height: 64 + insets.bottom,
-          paddingTop: 6,
-          paddingBottom: Math.max(insets.bottom, 8),
-        },
-        tabBarActiveTintColor: colors.primary,
-        tabBarInactiveTintColor: colors.textFaint,
-        tabBarLabelStyle: s.tabLabel,
-        tabBarActiveBackgroundColor: colors.primarySoft,
-        tabBarItemStyle: s.tabItem,
-      }}
-    >
-      <Tabs.Screen name="dashboard" options={{ title: 'Dashboard', tabBarIcon: ({ color, size }) => <Home color={color} size={size} strokeWidth={2.2} /> }} />
-      <Tabs.Screen name="visits" options={{ title: 'Visits', tabBarIcon: ({ color, size }) => <Truck color={color} size={size} strokeWidth={2.2} /> }} />
-      <Tabs.Screen name="expense-approvals" options={{ title: 'Approvals', tabBarIcon: ({ color, size }) => <Bell color={color} size={size} strokeWidth={2.2} /> }} />
-      <Tabs.Screen name="reports" options={{ title: 'Reports', tabBarIcon: ({ color, size }) => <BarChart2 color={color} size={size} strokeWidth={2.2} /> }} />
-      <Tabs.Screen name="more" options={{ title: 'More', tabBarIcon: ({ color, size }) => <MoreHorizontal color={color} size={size} strokeWidth={2.2} /> }} />
+    <Tabs screenOptions={tabScreenOptions(insets.bottom)}>
+      <Tabs.Screen name="dashboard" options={{ title: 'Home', tabBarIcon: tabIcon(LayoutDashboard) }} />
+      <Tabs.Screen name="visits" options={{ title: 'Visits', tabBarIcon: tabIcon(Route) }} />
+      <Tabs.Screen name="expense-approvals" options={{ title: 'Approvals', tabBarIcon: tabIcon(CircleCheckBig) }} />
+      <Tabs.Screen name="reports" options={{ title: 'Reports', tabBarIcon: tabIcon(BarChart3) }} />
+      <Tabs.Screen name="more" options={{ title: 'More', tabBarIcon: tabIcon(Menu) }} />
 
       {/* Hidden routable screens */}
       <Tabs.Screen name="visit-detail" options={{ href: null }} />
@@ -38,17 +23,3 @@ export default function AdminLayout() {
     </Tabs>
   );
 }
-
-const s = StyleSheet.create({
-  tabBar: {
-    backgroundColor: colors.white,
-    borderTopColor: colors.borderSoft,
-    borderTopWidth: 1,
-    ...Platform.select({
-      ios: { shadowColor: colors.primary, shadowOpacity: 0.05, shadowRadius: 10, shadowOffset: { width: 0, height: -3 } },
-      android: { elevation: 8 },
-    }),
-  },
-  tabLabel: { fontFamily: fonts.semibold, fontSize: 11, letterSpacing: 0.2 },
-  tabItem: { borderRadius: 14, marginHorizontal: 3, marginVertical: 2 },
-});

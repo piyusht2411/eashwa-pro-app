@@ -1,14 +1,24 @@
-import { Card } from "@/components/ui/Card";
-import { GradientHeader } from "@/components/ui/GradientHeader";
 import {
   getNotifications,
   markAllNotificationsRead,
   NotificationItem,
 } from "@/lib/api";
-import { colors, fonts, radius } from "@/lib/theme";
+import { accents, AccentName, colors, fonts, gradients, radius, shadow, spacing } from "@/lib/theme";
 import { useAuthStore } from "@/stores/authStore";
+import EmptyState from "@/components/ui/EmptyState";
+import { LinearGradient } from "expo-linear-gradient";
 import { router } from "expo-router";
-import { Bell, CheckCheck } from "lucide-react-native";
+import {
+  Bell,
+  CheckCheck,
+  CircleCheckBig,
+  CircleX,
+  Hourglass,
+  Package,
+  Receipt,
+  Route,
+  Wallet,
+} from "lucide-react-native";
 import { useCallback, useEffect, useState } from "react";
 import {
   ActivityIndicator,
@@ -19,15 +29,40 @@ import {
   Text,
   View,
 } from "react-native";
+import { SafeAreaView } from "react-native-safe-area-context";
 
-const TYPE_COLOR: Record<string, string> = {
-  new_container: "#2563EB",
-  new_production_log: "#D97706",
-  pdi_verified: "#16A34A",
-  pdi_incomplete: "#F97316",
-  pdi_verified_admin: "#8B5CF6",
-  payment_made: "#16A34A",
+/**
+ * Presentation per notification type.
+ *
+ * `transport: true` means the payload describes a visit, not a production
+ * entity — those must not be sent to /notification-detail, which only knows
+ * how to render containers and production logs.
+ */
+type TypeMeta = {
+  icon: React.ComponentType<{ size: number; color: string; strokeWidth: number }>;
+  accent: AccentName;
+  transport?: boolean;
 };
+
+const TYPE_META: Record<string, TypeMeta> = {
+  // Production portal
+  new_container: { icon: Package, accent: "info" },
+  new_production_log: { icon: Receipt, accent: "warning" },
+  pdi_verified: { icon: CircleCheckBig, accent: "success" },
+  pdi_incomplete: { icon: Hourglass, accent: "brand" },
+  pdi_verified_admin: { icon: CircleCheckBig, accent: "info" },
+  payment_made: { icon: Wallet, accent: "success" },
+
+  // Transport portal
+  new_visit: { icon: Route, accent: "brand", transport: true },
+  visit_created: { icon: Route, accent: "brand", transport: true },
+  visit_updated: { icon: Route, accent: "info", transport: true },
+  expense_approved: { icon: CircleCheckBig, accent: "success", transport: true },
+  expense_rejected: { icon: CircleX, accent: "danger", transport: true },
+  approval_required: { icon: Hourglass, accent: "warning", transport: true },
+};
+
+const FALLBACK_META: TypeMeta = { icon: Bell, accent: "neutral" };
 
 function formatRelative(iso: string) {
   const now = Date.now();
@@ -35,7 +70,7 @@ function formatRelative(iso: string) {
   if (!Number.isFinite(then)) return "";
   const diff = Math.max(0, now - then);
   const sec = Math.floor(diff / 1000);
-  if (sec < 60) return `${sec}s ago`;
+  if (sec < 60) return "Just now";
   const min = Math.floor(sec / 60);
   if (min < 60) return `${min} min ago`;
   const hr = Math.floor(min / 60);
@@ -45,8 +80,18 @@ function formatRelative(iso: string) {
   return new Date(iso).toLocaleDateString("en-IN", { day: "2-digit", month: "short" });
 }
 
+/** Where a transport notification should open, based on who is signed in. */
+function transportVisitPath(role?: string): string | null {
+  switch (role) {
+    case "admin": return "/(transport-admin)/visit-detail";
+    case "accounts": return "/(accounts)/visit-detail";
+    case "driver": return "/(driver)/visit-detail";
+    default: return null;
+  }
+}
+
 export default function NotificationsScreen() {
-  const { token } = useAuthStore();
+  const { token, user } = useAuthStore();
   const [items, setItems] = useState<NotificationItem[]>([]);
   const [page, setPage] = useState(1);
   const [hasNext, setHasNext] = useState(false);
@@ -75,9 +120,7 @@ export default function NotificationsScreen() {
     [token],
   );
 
-  useEffect(() => {
-    loadPage(1, true);
-  }, [loadPage]);
+  useEffect(() => { loadPage(1, true); }, [loadPage]);
 
   const handleRefresh = async () => {
     setRefreshing(true);
@@ -104,138 +147,176 @@ export default function NotificationsScreen() {
   };
 
   const handleTap = (item: NotificationItem) => {
+    const meta = TYPE_META[item.type];
+    const data = (item.data || {}) as Record<string, any>;
+
+    // Transport notifications open the visit itself; /notification-detail
+    // cannot render them and would show "Unknown notification type".
+    if (meta?.transport) {
+      const path = transportVisitPath(user?.role);
+      const visitId = data.visitId;
+      if (path && visitId) {
+        router.push({ pathname: path as any, params: { id: String(visitId) } });
+      }
+      return;
+    }
+
     const params: Record<string, string> = { type: item.type };
-    Object.entries(item.data || {}).forEach(([k, v]) => {
+    Object.entries(data).forEach(([k, v]) => {
       if (v != null) params[k] = String(v);
     });
     router.push({ pathname: "/notification-detail", params });
   };
 
+  const unreadCount = items.filter((i) => !i.isRead).length;
+
   return (
-    <View style={s.safe}>
-      <GradientHeader
-        title="Notifications"
-        subtitle="Tap any to view details"
-        leftIcon={<Bell color={colors.white} size={20} />}
-        right={
+    <SafeAreaView style={s.safe} edges={["top"]}>
+      <LinearGradient
+        colors={gradients.brandDeep}
+        start={{ x: 0, y: 0 }}
+        end={{ x: 1, y: 1 }}
+        style={s.header}
+      >
+        <View style={s.blob} pointerEvents="none" />
+        <View style={s.headerRow}>
+          <View style={{ flex: 1 }}>
+            <Text style={s.title}>Notifications</Text>
+            <Text style={s.subtitle}>
+              {unreadCount > 0 ? `${unreadCount} unread` : "You're all caught up"}
+            </Text>
+          </View>
           <Pressable
             onPress={handleMarkAll}
-            disabled={marking || items.length === 0}
-            style={[s.markAllBtn, (marking || items.length === 0) && { opacity: 0.5 }]}
+            disabled={marking || unreadCount === 0}
+            style={[s.markAllBtn, (marking || unreadCount === 0) && { opacity: 0.45 }]}
           >
             {marking ? (
               <ActivityIndicator color={colors.white} size="small" />
             ) : (
               <>
-                <CheckCheck color={colors.white} size={16} />
+                <CheckCheck color={colors.white} size={15} strokeWidth={2.4} />
                 <Text style={s.markAllText}>Mark all</Text>
               </>
             )}
           </Pressable>
-        }
-      />
+        </View>
+      </LinearGradient>
 
       {loading && items.length === 0 ? (
-        <View style={s.loadingWrap}>
-          <ActivityIndicator color={colors.primary} />
-        </View>
+        <ActivityIndicator style={{ marginTop: 60 }} size="large" color={colors.primary} />
       ) : (
         <FlatList
           data={items}
           keyExtractor={(item) => item._id}
-          contentContainerStyle={{ paddingHorizontal: 20, paddingVertical: 16, paddingBottom: 32 }}
+          contentContainerStyle={s.list}
+          showsVerticalScrollIndicator={false}
           refreshing={refreshing}
           onRefresh={handleRefresh}
           onEndReachedThreshold={0.4}
           onEndReached={handleEndReached}
           ListEmptyComponent={
-            <Card variant="outlined" style={{ alignItems: "center" }} padding={28}>
-              <Bell color={colors.textFaint} size={28} />
-              <Text style={s.emptyText}>No notifications yet</Text>
-            </Card>
+            <EmptyState
+              icon={<Bell size={24} color={colors.primary} strokeWidth={2} />}
+              title="No notifications yet"
+              subtitle="Updates about visits, expenses and approvals will show up here."
+            />
           }
           ListFooterComponent={
-            loadingMore ? <ActivityIndicator color={colors.primary} style={{ marginVertical: 16 }} /> : null
+            loadingMore ? <ActivityIndicator color={colors.primary} style={{ marginVertical: spacing.lg }} /> : null
           }
           renderItem={({ item }) => {
-            const accent = TYPE_COLOR[item.type] ?? colors.textMuted;
+            const meta = TYPE_META[item.type] ?? FALLBACK_META;
+            const a = accents[meta.accent];
+            const Icon = meta.icon;
+
             return (
-              <Pressable onPress={() => handleTap(item)}>
-                <View
-                  style={[
-                    s.row,
-                    { borderLeftColor: accent },
-                    !item.isRead && { backgroundColor: colors.primarySofter },
-                  ]}
-                >
-                  <View style={s.rowHeader}>
-                    <Text style={s.rowTitle} numberOfLines={1}>
-                      {item.title}
-                    </Text>
-                    {!item.isRead ? <View style={[s.unreadDot, { backgroundColor: accent }]} /> : null}
+              <Pressable onPress={() => handleTap(item)} style={({ pressed }) => pressed && { opacity: 0.85 }}>
+                <View style={[s.row, !item.isRead && s.rowUnread]}>
+                  <View style={[s.iconChip, { backgroundColor: a.bg, borderColor: a.ring }]}>
+                    <Icon size={17} color={a.fg} strokeWidth={2.3} />
                   </View>
-                  <Text style={s.rowBody} numberOfLines={2}>
-                    {item.body}
-                  </Text>
-                  <Text style={s.rowTime}>{formatRelative(item.createdAt)}</Text>
+
+                  <View style={s.rowMid}>
+                    <View style={s.rowHeader}>
+                      <Text style={[s.rowTitle, !item.isRead && s.rowTitleUnread]} numberOfLines={1}>
+                        {item.title}
+                      </Text>
+                      {!item.isRead ? <View style={[s.unreadDot, { backgroundColor: a.fg }]} /> : null}
+                    </View>
+                    <Text style={s.rowBody} numberOfLines={2}>{item.body}</Text>
+                    <Text style={s.rowTime}>{formatRelative(item.createdAt)}</Text>
+                  </View>
                 </View>
               </Pressable>
             );
           }}
         />
       )}
-    </View>
+    </SafeAreaView>
   );
 }
 
 const s = StyleSheet.create({
   safe: { flex: 1, backgroundColor: colors.bgSubtle },
+
   header: {
-    flexDirection: "row",
-    alignItems: "center",
-    gap: 12,
-    paddingHorizontal: 20,
-    paddingTop: 12,
-    paddingBottom: 14,
-    backgroundColor: colors.bg,
-    borderBottomWidth: 1,
-    borderBottomColor: colors.borderSoft,
+    paddingHorizontal: spacing.lg,
+    paddingTop: spacing.md,
+    paddingBottom: spacing.xl,
+    borderBottomLeftRadius: radius["2xl"],
+    borderBottomRightRadius: radius["2xl"],
+    overflow: "hidden",
   },
-  headerIcon: {
-    width: 40,
-    height: 40,
-    borderRadius: 12,
-    backgroundColor: colors.primarySofter,
-    alignItems: "center",
-    justifyContent: "center",
+  blob: {
+    position: "absolute",
+    top: -70,
+    right: -50,
+    width: 180,
+    height: 180,
+    borderRadius: 90,
+    backgroundColor: "rgba(255,255,255,0.12)",
   },
-  title: { fontFamily: fonts.extrabold, fontSize: 22, color: colors.text, letterSpacing: -0.3 },
-  subtitle: { fontFamily: fonts.medium, fontSize: 12, color: colors.textMuted, marginTop: 2 },
+  headerRow: { flexDirection: "row", alignItems: "center", gap: spacing.md },
+  title: { fontFamily: fonts.extrabold, fontSize: 23, letterSpacing: -0.4, color: colors.white },
+  subtitle: { fontFamily: fonts.medium, fontSize: 12.5, color: "rgba(255,255,255,0.82)", marginTop: 2 },
   markAllBtn: {
     flexDirection: "row",
     alignItems: "center",
     gap: 6,
-    backgroundColor: "rgba(255,255,255,0.22)",
+    backgroundColor: "rgba(255,255,255,0.2)",
     paddingHorizontal: 12,
     paddingVertical: 8,
-    borderRadius: radius.md,
+    borderRadius: radius.full,
   },
   markAllText: { fontFamily: fonts.bold, fontSize: 12, color: colors.white },
-  loadingWrap: { paddingTop: 40, alignItems: "center" },
-  emptyText: { fontFamily: fonts.medium, color: colors.textFaint, fontSize: 14, marginTop: 10 },
+
+  list: { padding: spacing.lg, paddingBottom: spacing["4xl"] },
   row: {
-    backgroundColor: colors.bg,
-    borderRadius: radius.md,
+    flexDirection: "row",
+    gap: spacing.md,
+    backgroundColor: colors.surface,
+    borderRadius: radius.lg,
     borderWidth: 1,
     borderColor: colors.borderSoft,
-    borderLeftWidth: 4,
-    paddingVertical: 12,
-    paddingHorizontal: 14,
-    marginBottom: 10,
+    padding: spacing.md,
+    marginBottom: spacing.sm,
+    ...shadow.sm,
   },
-  rowHeader: { flexDirection: "row", alignItems: "center", gap: 8 },
-  rowTitle: { fontFamily: fonts.bold, fontSize: 14, color: colors.text, flex: 1 },
-  unreadDot: { width: 8, height: 8, borderRadius: 4 },
-  rowBody: { fontFamily: fonts.regular, fontSize: 13, color: colors.textSecondary, marginTop: 4, lineHeight: 18 },
+  rowUnread: { borderColor: colors.primaryBorder, backgroundColor: colors.primarySofter },
+  iconChip: {
+    width: 38,
+    height: 38,
+    borderRadius: radius.md,
+    borderWidth: 1,
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  rowMid: { flex: 1 },
+  rowHeader: { flexDirection: "row", alignItems: "center", gap: spacing.sm },
+  rowTitle: { flex: 1, fontFamily: fonts.semibold, fontSize: 14, letterSpacing: -0.1, color: colors.text },
+  rowTitleUnread: { fontFamily: fonts.bold },
+  unreadDot: { width: 7, height: 7, borderRadius: 4 },
+  rowBody: { fontFamily: fonts.regular, fontSize: 12.5, lineHeight: 18, color: colors.textSecondary, marginTop: 3 },
   rowTime: { fontFamily: fonts.medium, fontSize: 11, color: colors.textFaint, marginTop: 6 },
 });

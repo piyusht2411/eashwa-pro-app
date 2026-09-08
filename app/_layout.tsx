@@ -8,8 +8,8 @@ import {
 } from '@expo-google-fonts/inter';
 import { Stack } from 'expo-router';
 import { StatusBar } from 'expo-status-bar';
-import { useEffect } from 'react';
-import { Text, TextInput, View } from 'react-native';
+import { useEffect, useRef } from 'react';
+import { InteractionManager, Text, TextInput, View } from 'react-native';
 import { GestureHandlerRootView } from 'react-native-gesture-handler';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
 
@@ -57,28 +57,42 @@ export default function RootLayout() {
   }, []);
 
   // ── Register FCM token with backend whenever the user is signed in ────────
+  // This effect fires the instant login flips `isSignedIn`, i.e. in the middle
+  // of the sign-in navigation. getFCMToken() reaches into native Firebase and
+  // can request the Android notification permission, so it is deferred until
+  // after the navigation transition settles and runs at most once per session.
+  const fcmHandledFor = useRef<string | null>(null);
+
   useEffect(() => {
     if (!isSignedIn || !token) return;
+    if (fcmHandledFor.current === token) return;
+    fcmHandledFor.current = token;
 
-    const registerToken = async () => {
-      try {
-        const fcmToken = await getFCMToken();
-        if (!fcmToken) {
-          console.log('[FCM] No token obtained (permission denied?)');
-          return;
+    const task = InteractionManager.runAfterInteractions(() => {
+      void (async () => {
+        try {
+          const fcmToken = await getFCMToken();
+          if (!fcmToken) {
+            console.log('[FCM] No token obtained (permission denied?)');
+          } else {
+            await updateFcmToken(fcmToken, token);
+            console.log('[FCM] Token registered with backend ✅');
+          }
+        } catch (err) {
+          // Non-fatal — notifications still work, the token may just be stale.
+          console.error('[FCM] Token registration failed:', err);
         }
-        await updateFcmToken(fcmToken, token);
-        console.log('[FCM] Token registered with backend ✅');
-      } catch (err) {
-        // Non-fatal — notifications still work, just token might be stale
-        console.error('[FCM] Token registration failed:', err);
-      }
-    };
 
-    registerToken();
+        try {
+          // Did a notification tap open the app? (cold start)
+          await checkInitialNotification();
+        } catch (err) {
+          console.error('[Notifications] Initial check failed:', err);
+        }
+      })();
+    });
 
-    // Check if app was opened by tapping a notification (cold start)
-    checkInitialNotification();
+    return () => task.cancel();
   }, [isSignedIn, token]);
 
   if (!fontsLoaded) {
