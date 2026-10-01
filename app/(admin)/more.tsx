@@ -1,3 +1,4 @@
+import { PortalSwitchCard } from "@/components/PortalSwitch";
 import { colors, fonts, radius, shadow } from "@/lib/theme";
 import { useAuthStore } from "@/stores/authStore";
 import { LinearGradient } from "expo-linear-gradient";
@@ -78,10 +79,8 @@ export default function AdminMore() {
       {
         text: "Log out",
         style: "destructive",
-        onPress: async () => {
-          await logout();
-          router.replace("/(auth)/login");
-        },
+        // Clearing the session is enough — the root guard shows the login screen.
+        onPress: () => { void logout(); },
       },
     ]);
   };
@@ -122,6 +121,9 @@ export default function AdminMore() {
                 <Text style={s.roleBadgeText}>ADMIN</Text>
               </View>
             </View>
+
+            {/* Cross-portal admins only — renders nothing for everyone else. */}
+            <PortalSwitchCard style={{ marginBottom: 22 }} />
 
             <Text style={s.sectionTitle}>SHORTCUTS</Text>
 

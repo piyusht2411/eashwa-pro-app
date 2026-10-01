@@ -1,14 +1,21 @@
 import React from 'react';
 import { StyleSheet, Text, View, ViewStyle } from 'react-native';
-import { Fuel, ReceiptText, UtensilsCrossed } from 'lucide-react-native';
+import { CreditCard, Droplets, Flag, Fuel, ReceiptText, UtensilsCrossed } from 'lucide-react-native';
 
 import { accents, AccentName, colors, fonts, radius, spacing } from '@/lib/theme';
+import type { ExpenseType } from '@/types';
 
-export type ExpenseType = 'food' | 'cng' | 'other';
+export type { ExpenseType };
+
+/** Every expense type a visit can carry, in display order. */
+export const EXPENSE_TYPES: readonly ExpenseType[] = ['food', 'cng', 'diesel', 'fastTag', 'border', 'other'];
 
 const META: Record<ExpenseType, { label: string; accent: AccentName }> = {
   food: { label: 'Food', accent: 'warning' },
   cng: { label: 'CNG', accent: 'info' },
+  diesel: { label: 'Diesel', accent: 'brand' },
+  fastTag: { label: 'FASTag', accent: 'success' },
+  border: { label: 'Border', accent: 'danger' },
   other: { label: 'Other', accent: 'neutral' },
 };
 
@@ -21,6 +28,12 @@ export function expenseIcon(type: ExpenseType, size = 15, color?: string) {
       return <UtensilsCrossed {...props} color={c} />;
     case 'cng':
       return <Fuel {...props} color={c} />;
+    case 'diesel':
+      return <Droplets {...props} color={c} />;
+    case 'fastTag':
+      return <CreditCard {...props} color={c} />;
+    case 'border':
+      return <Flag {...props} color={c} />;
     default:
       return <ReceiptText {...props} color={c} />;
   }

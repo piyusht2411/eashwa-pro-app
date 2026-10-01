@@ -6,8 +6,9 @@ import { Container, ProductionLog, useProductionStore } from "@/stores/productio
 import { GradientHeader } from "@/components/ui/GradientHeader";
 import { ClipboardList, Plus, Target } from "lucide-react-native";
 import { useCallback, useEffect, useState } from "react";
-import { ActivityIndicator, Alert, KeyboardAvoidingView, Platform, Pressable, RefreshControl, ScrollView, StyleSheet, Text, TextInput, View } from "react-native";
+import { ActivityIndicator, Alert, Pressable, RefreshControl, ScrollView, StyleSheet, Text, TextInput, View } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
+import { KeyboardAwareScrollView } from "react-native-keyboard-controller";
 
 const getAssignedTeamId = (container: Container) =>
   typeof container.assignedTeam === "string" ? container.assignedTeam : container.assignedTeam._id;
@@ -116,12 +117,9 @@ export default function LogProduction() {
         subtitle="Submit your daily output"
         leftIcon={<ClipboardList color="#fff" size={20} />}
       />
-      <KeyboardAvoidingView
-        behavior={Platform.OS === "ios" ? "padding" : undefined}
-        keyboardVerticalOffset={Platform.OS === "ios" ? 0 : 0}
+      <KeyboardAwareScrollView
         style={s.flex}
-      >
-      <ScrollView
+        bottomOffset={24}
         showsVerticalScrollIndicator={false}
         onScroll={({ nativeEvent }) => {
           if (isNearScrollBottom(nativeEvent)) handleLoadMore();
@@ -270,8 +268,7 @@ export default function LogProduction() {
         )}
         {loadingMore && <ActivityIndicator color="#F97316" style={{ marginVertical: 16 }} />}
         <View style={{ height: 24 }} />
-      </ScrollView>
-      </KeyboardAvoidingView>
+      </KeyboardAwareScrollView>
     </View>
   );
 }

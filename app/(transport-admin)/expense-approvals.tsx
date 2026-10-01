@@ -15,15 +15,15 @@ import { Check, ChevronRight, CircleCheckBig, MapPin, X } from 'lucide-react-nat
 
 import { getPendingExpenses, approveExpenseItem, rejectExpenseItem } from '@/lib/api';
 import RejectReasonModal from '@/components/ui/RejectReasonModal';
-import ExpenseTypeBadge from '@/components/ui/ExpenseTypeBadge';
+import ExpenseTypeBadge, { EXPENSE_TYPES, expenseLabel } from '@/components/ui/ExpenseTypeBadge';
 import EmptyState from '@/components/ui/EmptyState';
 import { useAuthStore } from '@/stores/authStore';
 import { colors, fonts, radius, shadow, spacing } from '@/lib/theme';
 import { formatDays, formatINR } from '@/lib/format';
-import type { Expense, Visit } from '@/types';
+import { driverAmountOf, isAwaitingApproval } from '@/lib/expense';
+import type { Expense, ExpenseType, Visit } from '@/types';
 
 type PendingExpense = Omit<Expense, 'visit'> & { visit: Visit };
-type ExpenseType = 'food' | 'cng' | 'other';
 
 export default function ExpenseApprovalsScreen() {
   const { token } = useAuthStore();
@@ -46,7 +46,8 @@ export default function ExpenseApprovalsScreen() {
 
   const handleApprove = (expense: PendingExpense, type: ExpenseType) => {
     if (!token) return;
-    Alert.alert('Approve', `Approve ${type} expense of ${formatINR(expense[type].amount)}?`, [
+    // Only the driver's share is under review — the company share needs no decision.
+    Alert.alert('Approve', `Approve ${formatINR(driverAmountOf(expense[type]))} of ${expenseLabel(type)} paid by the driver?`, [
       { text: 'Cancel', style: 'cancel' },
       { text: 'Approve', onPress: async () => {
           try { await approveExpenseItem(expense._id, type, token); load(); }
@@ -76,16 +77,16 @@ export default function ExpenseApprovalsScreen() {
   };
 
   const pendingCount = expenses.reduce((sum, e) => {
-    return sum + (['food', 'cng', 'other'] as ExpenseType[]).filter(
-      t => e[t]?.paidBy === 'driver' && e[t]?.status === 'pending'
+    return sum + EXPENSE_TYPES.filter(
+      t => isAwaitingApproval(e[t])
     ).length;
   }, 0);
 
   const renderItem = ({ item }: { item: PendingExpense }) => {
     const visit = typeof item.visit === 'object' ? item.visit : null;
     const driver = visit && typeof visit.driver === 'object' ? visit.driver : null;
-    const pendingTypes: ExpenseType[] = (['food', 'cng', 'other'] as ExpenseType[]).filter(
-      t => item[t]?.paidBy === 'driver' && item[t]?.status === 'pending'
+    const pendingTypes = EXPENSE_TYPES.filter(
+      t => isAwaitingApproval(item[t])
     );
 
     return (
@@ -111,7 +112,8 @@ export default function ExpenseApprovalsScreen() {
           <View key={type} style={[s.expenseRow, i === pendingTypes.length - 1 && s.expenseRowLast]}>
             <View style={s.expenseLeft}>
               <ExpenseTypeBadge type={type} />
-              <Text style={s.expAmount}>{formatINR(item[type].amount)}</Text>
+              {/* The reimbursable share, not the whole bill. */}
+              <Text style={s.expAmount}>{formatINR(driverAmountOf(item[type]))}</Text>
             </View>
             <View style={s.actions}>
               <TouchableOpacity style={s.rejectBtn} onPress={() => handleReject(item, type)} activeOpacity={0.85}>

@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useState } from 'react';
+import React, { useCallback, useEffect, useRef, useState } from 'react';
 import {
   ActivityIndicator,
   Alert,
@@ -28,38 +28,53 @@ import {
 import { getVisitById, approveExpenseItem, rejectExpenseItem } from '@/lib/api';
 import RejectReasonModal from '@/components/ui/RejectReasonModal';
 import StatusPill from '@/components/ui/StatusPill';
-import ExpenseTypeBadge from '@/components/ui/ExpenseTypeBadge';
+import ExpenseTypeBadge, { EXPENSE_TYPES, expenseLabel } from '@/components/ui/ExpenseTypeBadge';
 import { useAuthStore } from '@/stores/authStore';
 import { colors, fonts, gradients, radius, shadow, spacing } from '@/lib/theme';
-import { formatCount, formatDate, formatDays, formatINR, formatKm } from '@/lib/format';
-import type { Expense, ExpenseItem, Visit } from '@/types';
-
-type ExpenseType = 'food' | 'cng' | 'other';
+import { formatCount, formatDays, formatINR, formatKm, formatVisitWhen } from '@/lib/format';
+import { companyAmountOf, driverAmountOf, isAwaitingApproval, itemTotal } from '@/lib/expense';
+import type { Expense, ExpenseItem, ExpenseType, Visit } from '@/types';
 
 export default function AdminVisitDetailScreen() {
   const { id } = useLocalSearchParams<{ id: string }>();
   const { token } = useAuthStore();
   const [visit, setVisit] = useState<Visit | null>(null);
   const [expense, setExpense] = useState<Expense | null>(null);
-  const [loading, setLoading] = useState(true);
+  // Which visit the state below belongs to. This screen sits inside a tab
+  // navigator, so opening another visit swaps the `id` param on the component
+  // that is already mounted rather than mounting a fresh one. Without this the
+  // previous visit stays on screen until the new one arrives.
+  const [loadedId, setLoadedId] = useState<string | null>(null);
+  const requestSeq = useRef(0);
   const [rejectTarget, setRejectTarget] = useState<ExpenseType | null>(null);
   const [rejecting, setRejecting] = useState(false);
 
   const load = useCallback(async () => {
     if (!token || !id) return;
+    const seq = ++requestSeq.current;
     try {
       const res = await getVisitById(id, token);
+      // Another visit was opened while this was in flight — drop the answer.
+      if (seq !== requestSeq.current) return;
       setVisit(res.visit);
       setExpense(res.expense);
-    } catch (e) { console.error(e); }
-    finally { setLoading(false); }
+    } catch (e) {
+      if (seq !== requestSeq.current) return;
+      console.error(e);
+      setVisit(null);
+      setExpense(null);
+    } finally {
+      if (seq === requestSeq.current) setLoadedId(id);
+    }
   }, [token, id]);
 
   useEffect(() => { load(); }, [load]);
 
   const handleApprove = async (type: ExpenseType) => {
     if (!token || !expense) return;
-    Alert.alert('Approve Expense', `Approve ${type} expense?`, [
+    // Only the driver's share is under review — the company share is already counted.
+    const reimbursable = driverAmountOf(expense[type]);
+    Alert.alert('Approve Expense', `Approve ${formatINR(reimbursable)} of ${expenseLabel(type)} paid by the driver?`, [
       { text: 'Cancel', style: 'cancel' },
       {
         text: 'Approve', onPress: async () => {
@@ -91,7 +106,8 @@ export default function AdminVisitDetailScreen() {
     }
   };
 
-  if (loading) {
+  // Show the spinner until the data on screen is this visit's, not the last one's.
+  if (loadedId !== id) {
     return (
       <SafeAreaView style={s.centered}>
         <ActivityIndicator size="large" color={colors.primary} />
@@ -107,6 +123,8 @@ export default function AdminVisitDetailScreen() {
   }
 
   const driver = typeof visit.driver === 'object' ? visit.driver : null;
+  // Six types is a lot of "Not recorded" — list only the ones that carry money.
+  const recordedTypes = expense ? EXPENSE_TYPES.filter(t => itemTotal(expense[t]) > 0) : [];
 
   return (
     <SafeAreaView style={s.root} edges={['top']}>
@@ -142,8 +160,8 @@ export default function AdminVisitDetailScreen() {
         <View style={s.section}>
           <Text style={s.sectionTitle}>Visit Information</Text>
           <InfoRow icon={<MapPin size={14} color={colors.textMuted} />} label="Destination" value={visit.destination} />
-          <InfoRow icon={<CalendarDays size={14} color={colors.textMuted} />} label="Start Date" value={formatDate(visit.startDate)} />
-          <InfoRow icon={<CalendarDays size={14} color={colors.textMuted} />} label="End Date" value={formatDate(visit.endDate)} />
+          <InfoRow icon={<CalendarDays size={14} color={colors.textMuted} />} label="Start" value={formatVisitWhen(visit.startDate, visit.startTime)} />
+          <InfoRow icon={<CalendarDays size={14} color={colors.textMuted} />} label="End" value={formatVisitWhen(visit.endDate, visit.endTime)} />
           {visit.billNumber ? (
             <InfoRow icon={<FileText size={14} color={colors.textMuted} />} label="Bill No." value={visit.billNumber} last />
           ) : null}
@@ -153,26 +171,19 @@ export default function AdminVisitDetailScreen() {
           <>
             <View style={s.section}>
               <Text style={s.sectionTitle}>Expenses</Text>
-              <ExpenseCard
-                type="food"
-                item={expense.food}
-                maxAllowed={400 * visit.totalDays}
-                onApprove={() => handleApprove('food')}
-                onReject={() => handleReject('food')}
-              />
-              <ExpenseCard
-                type="cng"
-                item={expense.cng}
-                onApprove={() => handleApprove('cng')}
-                onReject={() => handleReject('cng')}
-              />
-              <ExpenseCard
-                type="other"
-                item={expense.other}
-                onApprove={() => handleApprove('other')}
-                onReject={() => handleReject('other')}
-                last
-              />
+              {recordedTypes.length === 0 ? (
+                <Text style={s.emptyText}>No amounts recorded yet.</Text>
+              ) : recordedTypes.map((type, i) => (
+                <ExpenseCard
+                  key={type}
+                  type={type}
+                  item={expense[type]!}
+                  maxAllowed={type === 'food' ? 400 * visit.totalDays : undefined}
+                  onApprove={() => handleApprove(type)}
+                  onReject={() => handleReject(type)}
+                  last={i === recordedTypes.length - 1}
+                />
+              ))}
             </View>
 
             <View style={s.section}>
@@ -195,7 +206,7 @@ export default function AdminVisitDetailScreen() {
 
       <RejectReasonModal
         visible={rejectTarget !== null}
-        message={rejectTarget ? `Enter reason for rejecting ${rejectTarget} expense:` : undefined}
+        message={rejectTarget ? `Enter reason for rejecting ${expenseLabel(rejectTarget)} expense:` : undefined}
         submitting={rejecting}
         onCancel={() => setRejectTarget(null)}
         onSubmit={submitReject}
@@ -245,26 +256,41 @@ function ExpenseCard({
   type: ExpenseType; item: ExpenseItem; maxAllowed?: number;
   onApprove: () => void; onReject: () => void; last?: boolean;
 }) {
-  const isPending = item.status === 'pending' && item.paidBy === 'driver';
-  const overLimit = maxAllowed !== undefined && item.amount > maxAllowed;
+  const driverPaid = driverAmountOf(item);
+  const companyPaid = companyAmountOf(item);
+  const total = itemTotal(item);
+  const isPending = isAwaitingApproval(item);
+  const overLimit = maxAllowed !== undefined && total > maxAllowed;
 
   return (
     <View style={[s.expenseCard, last && { marginBottom: 0 }]}>
       <View style={s.expenseHeader}>
         <ExpenseTypeBadge type={type} />
-        <Text style={s.expenseAmount}>{formatINR(item.amount)}</Text>
+        <Text style={s.expenseAmount}>{formatINR(total)}</Text>
+      </View>
+
+      {/* Who put in what. A bill can be settled from both sides at once. */}
+      <View style={s.splitRow}>
+        {driverPaid > 0 ? (
+          <View style={s.paidByChip}>
+            <User size={11} color={colors.primary} strokeWidth={2.3} />
+            <Text style={[s.paidByText, { color: colors.primary }]}>Driver {formatINR(driverPaid)}</Text>
+          </View>
+        ) : null}
+        {companyPaid > 0 ? (
+          <View style={s.paidByChip}>
+            <Building2 size={11} color={colors.info} strokeWidth={2.3} />
+            <Text style={[s.paidByText, { color: colors.info }]}>Company {formatINR(companyPaid)}</Text>
+          </View>
+        ) : null}
+        {total === 0 ? <Text style={s.paidByText}>Not recorded</Text> : null}
       </View>
 
       <View style={s.expenseMeta}>
         <StatusPill status={item.status} />
-        <View style={s.paidByChip}>
-          {item.paidBy === 'company'
-            ? <Building2 size={11} color={colors.info} strokeWidth={2.3} />
-            : <User size={11} color={colors.textMuted} strokeWidth={2.3} />}
-          <Text style={[s.paidByText, item.paidBy === 'company' && { color: colors.info }]}>
-            {item.paidBy === 'company' ? 'Company' : 'Driver paid'}
-          </Text>
-        </View>
+        {driverPaid > 0 ? (
+          <Text style={s.statusNote}>on {formatINR(driverPaid)} paid by the driver</Text>
+        ) : null}
       </View>
 
       {maxAllowed !== undefined ? (
@@ -396,6 +422,8 @@ const s = StyleSheet.create({
   expenseHeader: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: spacing.sm },
   expenseAmount: { fontFamily: fonts.extrabold, fontSize: 19, letterSpacing: -0.4, color: colors.text },
   expenseMeta: { flexDirection: 'row', alignItems: 'center', gap: spacing.sm, marginTop: spacing.md },
+  splitRow: { flexDirection: 'row', flexWrap: 'wrap', alignItems: 'center', gap: spacing.sm, marginTop: spacing.md },
+  statusNote: { fontFamily: fonts.medium, fontSize: 11, color: colors.textFaint },
   paidByChip: {
     flexDirection: 'row',
     alignItems: 'center',

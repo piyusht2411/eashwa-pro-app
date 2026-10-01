@@ -29,6 +29,7 @@ import { useAuthStore } from '@/stores/authStore';
 import { colors, fonts, radius, shadow, spacing } from '@/lib/theme';
 import { formatCount, formatINR, formatINRCompact, formatKm } from '@/lib/format';
 import DashboardHeader from '@/components/ui/DashboardHeader';
+import { PortalSwitchPill } from '@/components/PortalSwitch';
 import StatTile from '@/components/ui/StatTile';
 import SectionHeader from '@/components/ui/SectionHeader';
 import EmptyState from '@/components/ui/EmptyState';
@@ -73,7 +74,12 @@ export default function AdminDashboardScreen() {
           <RefreshControl refreshing={refreshing} onRefresh={() => { setRefreshing(true); load(); }} tintColor={colors.primary} />
         }
       >
-        <DashboardHeader name={user?.name} subtitle="Fleet activity at a glance" />
+        <DashboardHeader
+          name={user?.name}
+          subtitle="Fleet activity at a glance"
+          /* Only renders for an admin who runs both portals. */
+          right={<PortalSwitchPill />}
+        />
 
         <View style={s.body}>
           {/* Reimbursement split — the number an admin actually acts on. */}

@@ -1,13 +1,14 @@
-import React, { useCallback, useEffect, useState } from 'react';
+import React, { useCallback, useEffect, useRef, useState } from 'react';
 import {
-  ActivityIndicator, Alert, ScrollView, StyleSheet, Text,
+  ActivityIndicator, Alert, StyleSheet, Text,
   TextInput, TouchableOpacity, View,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
-import { router, useLocalSearchParams } from 'expo-router';
+import { KeyboardAwareScrollView } from 'react-native-keyboard-controller';
+import { router, useFocusEffect, useLocalSearchParams } from 'expo-router';
 import {
   ArrowLeft, Building2, CalendarDays, FileText, Gauge,
-  MapPin, Package, Trash2, Truck, User,
+  MapPin, Package, Pencil, Trash2, Truck, User,
 } from 'lucide-react-native';
 import { LinearGradient } from 'expo-linear-gradient';
 
@@ -17,60 +18,136 @@ import {
 } from '@/lib/api';
 import { useAuthStore } from '@/stores/authStore';
 import { colors, fonts, gradients, radius, shadow, spacing } from '@/lib/theme';
-import { formatCount, formatDate, formatDays, formatINR, formatKm } from '@/lib/format';
+import { formatCount, formatDays, formatINR, formatKm, formatVisitWhen } from '@/lib/format';
 import StatusPill from '@/components/ui/StatusPill';
-import ExpenseTypeBadge from '@/components/ui/ExpenseTypeBadge';
-import type { Expense, Visit } from '@/types';
+import ExpenseTypeBadge, { EXPENSE_TYPES } from '@/components/ui/ExpenseTypeBadge';
+import type { Expense, ExpenseItem, ExpenseType, Visit } from '@/types';
 
-type ExpenseType = 'food' | 'cng' | 'other';
-const TYPES: ExpenseType[] = ['food', 'cng', 'other'];
+type PayerForm = { driverAmount: string; companyAmount: string };
+type ExpenseForm = Record<Exclude<ExpenseType, 'other'>, PayerForm> & {
+  other: PayerForm & { description: string };
+};
+
+const emptyExpenseForm = (): ExpenseForm => ({
+  food: { driverAmount: '', companyAmount: '' },
+  cng: { driverAmount: '', companyAmount: '' },
+  diesel: { driverAmount: '', companyAmount: '' },
+  fastTag: { driverAmount: '', companyAmount: '' },
+  border: { driverAmount: '', companyAmount: '' },
+  other: { driverAmount: '', companyAmount: '', description: '' },
+});
+
+/** Blank rather than a literal "0", so the placeholder shows for unused payers. */
+const amountText = (value?: number | null) => (value ? String(value) : '');
+
+const toAmount = (text: string) => Math.max(0, parseFloat(text) || 0);
+
+/** Pull the two payer figures off a saved item, tolerating the old single-amount shape. */
+const payerFields = (item?: ExpenseItem | null) => ({
+  driverAmount: amountText(item?.driverAmount ?? (item?.paidBy === 'company' ? 0 : item?.amount)),
+  companyAmount: amountText(item?.companyAmount ?? (item?.paidBy === 'company' ? item?.amount : 0)),
+});
 
 export default function AccountsVisitDetailScreen() {
   const { id } = useLocalSearchParams<{ id: string }>();
   const { token } = useAuthStore();
   const [visit, setVisit] = useState<Visit | null>(null);
   const [expense, setExpense] = useState<Expense | null>(null);
-  const [loading, setLoading] = useState(true);
-  const [expenseForm, setExpenseForm] = useState({
-    food: { amount: '', paidBy: 'driver' as 'driver' | 'company' },
-    cng: { amount: '', paidBy: 'company' as 'driver' | 'company' },
-    other: { amount: '', paidBy: 'driver' as 'driver' | 'company', description: '' },
-  });
+  // Which visit the state below belongs to. This screen sits inside a tab
+  // navigator, so opening another visit swaps the `id` param on the component
+  // that is already mounted rather than mounting a fresh one. Without this the
+  // previous visit stays on screen — and its typed amounts stay in the form —
+  // until the new one arrives.
+  const [loadedId, setLoadedId] = useState<string | null>(null);
+  const requestSeq = useRef(0);
+  // A bill can be settled from both sides at once — e.g. ₹4000 of CNG where the
+  // driver put in ₹2000 and the company ₹2000 — so each type carries a figure
+  // per payer. Either may be left blank.
+  const [expenseForm, setExpenseForm] = useState(emptyExpenseForm);
   const [saving, setSaving] = useState(false);
 
   const load = useCallback(async () => {
     if (!token || !id) return;
+    const seq = ++requestSeq.current;
     try {
       const res = await getVisitById(id, token);
+      // Another visit was opened while this was in flight — drop the answer.
+      if (seq !== requestSeq.current) return;
       setVisit(res.visit);
       setExpense(res.expense);
-      if (res.expense) {
-        setExpenseForm({
-          food: { amount: String(res.expense.food?.amount ?? ''), paidBy: res.expense.food?.paidBy ?? 'driver' },
-          cng: { amount: String(res.expense.cng?.amount ?? ''), paidBy: res.expense.cng?.paidBy ?? 'company' },
-          other: { amount: String(res.expense.other?.amount ?? ''), paidBy: res.expense.other?.paidBy ?? 'driver', description: (res.expense.other as any)?.description ?? '' },
-        });
-      }
-    } catch (e) { console.error(e); }
-    finally { setLoading(false); }
+      // Always reset the form: a visit with no expenses must not inherit the
+      // amounts typed for the one before it.
+      setExpenseForm(res.expense ? {
+        food: payerFields(res.expense.food),
+        cng: payerFields(res.expense.cng),
+        diesel: payerFields(res.expense.diesel),
+        fastTag: payerFields(res.expense.fastTag),
+        border: payerFields(res.expense.border),
+        other: {
+          ...payerFields(res.expense.other),
+          description: (res.expense.other as any)?.description ?? '',
+        },
+      } : emptyExpenseForm());
+    } catch (e) {
+      if (seq !== requestSeq.current) return;
+      console.error(e);
+      setVisit(null);
+      setExpense(null);
+      setExpenseForm(emptyExpenseForm());
+    } finally {
+      if (seq === requestSeq.current) setLoadedId(id);
+    }
   }, [token, id]);
 
   useEffect(() => { load(); }, [load]);
 
+  // Coming back from the edit screen — pick up the saved changes. The first
+  // focus is already covered by the effect above.
+  const focusedOnce = useRef(false);
+  useFocusEffect(useCallback(() => {
+    if (focusedOnce.current) load();
+    focusedOnce.current = true;
+  }, [load]));
+
+  const typedTotal = (type: ExpenseType) =>
+    toAmount(expenseForm[type].driverAmount) + toAmount(expenseForm[type].companyAmount);
+
+  const savedTotal = (type: ExpenseType) => {
+    const item = (expense as any)?.[type];
+    if (!item) return 0;
+    return (Number(item.driverAmount) || 0) + (Number(item.companyAmount) || 0) || (Number(item.amount) || 0);
+  };
+
+  const isTouched = (type: ExpenseType) =>
+    expenseForm[type].driverAmount !== '' ||
+    expenseForm[type].companyAmount !== '' ||
+    savedTotal(type) > 0;
+
   const handleSaveExpense = async () => {
     if (!token || !id || !visit) return;
     const maxFood = 400 * visit.totalDays;
-    const foodAmt = parseFloat(expenseForm.food.amount) || 0;
-    if (foodAmt > maxFood) {
+    // The cap is on the bill as a whole, no matter who settled which part.
+    if (typedTotal('food') > maxFood) {
       Alert.alert('Limit Exceeded', `Food allowance cannot exceed ${formatINR(maxFood)} (₹400 × ${visit.totalDays} days)`);
       return;
     }
     setSaving(true);
     try {
       const payload: UpsertExpensePayload = {};
-      if (expenseForm.food.amount) payload.food = { amount: foodAmt, paidBy: expenseForm.food.paidBy };
-      if (expenseForm.cng.amount) payload.cng = { amount: parseFloat(expenseForm.cng.amount), paidBy: expenseForm.cng.paidBy };
-      if (expenseForm.other.amount) payload.other = { amount: parseFloat(expenseForm.other.amount), paidBy: expenseForm.other.paidBy, description: expenseForm.other.description };
+      // An item is sent when it has been typed into, or when it already holds a
+      // figure — that second case is what lets a saved amount be cleared to zero.
+      for (const type of EXPENSE_TYPES) {
+        if (!isTouched(type)) continue;
+        const portions = {
+          driverAmount: toAmount(expenseForm[type].driverAmount),
+          companyAmount: toAmount(expenseForm[type].companyAmount),
+        };
+        if (type === 'other') {
+          payload.other = { ...portions, description: expenseForm.other.description };
+        } else {
+          payload[type] = portions;
+        }
+      }
       await upsertExpense(id, payload, token);
       Alert.alert('Saved', 'Expense saved successfully');
       load();
@@ -83,14 +160,15 @@ export default function AccountsVisitDetailScreen() {
       { text: 'Cancel', style: 'cancel' },
       { text: 'Delete', style: 'destructive', onPress: async () => {
           if (!token || !id) return;
-          try { await deleteVisit(id, token); router.back(); }
+          try { await deleteVisit(id, token); router.navigate('/(accounts)/visits' as any); }
           catch (e: any) { Alert.alert('Error', e.message); }
         },
       },
     ]);
   };
 
-  if (loading) {
+  // Show the spinner until the data on screen is this visit's, not the last one's.
+  if (loadedId !== id) {
     return (
       <SafeAreaView style={s.centered}>
         <ActivityIndicator size="large" color={colors.primary} />
@@ -117,6 +195,13 @@ export default function AccountsVisitDetailScreen() {
           </TouchableOpacity>
           <Text style={s.headerTitle}>Visit Details</Text>
           <View style={{ flex: 1 }} />
+          <TouchableOpacity
+            style={s.deleteBtn}
+            onPress={() => router.push({ pathname: '/(accounts)/create-visit' as any, params: { id } })}
+            hitSlop={8}
+          >
+            <Pencil size={16} color={colors.white} strokeWidth={2.3} />
+          </TouchableOpacity>
           <TouchableOpacity style={s.deleteBtn} onPress={handleDelete} hitSlop={8}>
             <Trash2 size={17} color={colors.white} strokeWidth={2.3} />
           </TouchableOpacity>
@@ -135,7 +220,12 @@ export default function AccountsVisitDetailScreen() {
         </View>
       </LinearGradient>
 
-      <ScrollView contentContainerStyle={s.body} showsVerticalScrollIndicator={false}>
+      <KeyboardAwareScrollView
+        contentContainerStyle={s.body}
+        bottomOffset={24}
+        keyboardShouldPersistTaps="handled"
+        showsVerticalScrollIndicator={false}
+      >
         <View style={s.factRow}>
           <Fact icon={<CalendarDays size={15} color={colors.primaryDark} strokeWidth={2.3} />} value={formatDays(visit.totalDays)} label="Duration" />
           <Fact icon={<Gauge size={15} color={colors.info} strokeWidth={2.3} />} value={formatKm(visit.distance)} label="Distance" />
@@ -145,7 +235,8 @@ export default function AccountsVisitDetailScreen() {
         <View style={s.section}>
           <Text style={s.sectionTitle}>Visit Information</Text>
           <InfoRow icon={<MapPin size={14} color={colors.textMuted} />} label="Destination" value={visit.destination} />
-          <InfoRow icon={<CalendarDays size={14} color={colors.textMuted} />} label="Dates" value={`${formatDate(visit.startDate)} – ${formatDate(visit.endDate)}`} />
+          <InfoRow icon={<CalendarDays size={14} color={colors.textMuted} />} label="Start" value={formatVisitWhen(visit.startDate, visit.startTime)} />
+          <InfoRow icon={<CalendarDays size={14} color={colors.textMuted} />} label="End" value={formatVisitWhen(visit.endDate, visit.endTime)} />
           {visit.billNumber ? (
             <InfoRow icon={<FileText size={14} color={colors.textMuted} />} label="Bill No." value={visit.billNumber} last />
           ) : null}
@@ -158,27 +249,20 @@ export default function AccountsVisitDetailScreen() {
               Food limit {formatINR(maxFood)} · ₹400 × {visit.totalDays} days
             </Text>
           </View>
+          <Text style={s.payerHint}>
+            Enter what each side paid. Fill one, or both when a single bill was
+            split — e.g. ₹4,000 of CNG as ₹2,000 driver and ₹2,000 company.
+          </Text>
 
-          {TYPES.map(type => {
-            const status = (expense as any)?.[type]?.status;
+          {EXPENSE_TYPES.map(type => {
+            // Types added after an expense was saved come back with a default
+            // status and nothing in them — no pill until there is money to judge.
+            const status = savedTotal(type) > 0 ? expense?.[type]?.status : undefined;
             return (
               <View key={type} style={s.expenseBlock}>
                 <View style={s.expenseHead}>
                   <ExpenseTypeBadge type={type} />
                   {status ? <StatusPill status={status} /> : null}
-                </View>
-
-                <Text style={s.fieldLabel}>Amount</Text>
-                <View style={s.amountWrap}>
-                  <Text style={s.rupee}>₹</Text>
-                  <TextInput
-                    style={s.amountInput}
-                    placeholder="0"
-                    placeholderTextColor={colors.textFaint}
-                    keyboardType="numeric"
-                    value={expenseForm[type].amount}
-                    onChangeText={v => setExpenseForm(p => ({ ...p, [type]: { ...p[type], amount: v } }))}
-                  />
                 </View>
 
                 {type === 'other' && (
@@ -194,25 +278,29 @@ export default function AccountsVisitDetailScreen() {
                   </>
                 )}
 
-                <Text style={s.fieldLabel}>Paid by</Text>
-                <View style={s.segment}>
-                  <TouchableOpacity
-                    style={[s.segmentBtn, expenseForm[type].paidBy === 'driver' && s.segmentBtnActive]}
-                    onPress={() => setExpenseForm(p => ({ ...p, [type]: { ...p[type], paidBy: 'driver' } }))}
-                    activeOpacity={0.85}
-                  >
-                    <User size={13} color={expenseForm[type].paidBy === 'driver' ? colors.white : colors.textMuted} strokeWidth={2.3} />
-                    <Text style={[s.segmentText, expenseForm[type].paidBy === 'driver' && s.segmentTextActive]}>Driver</Text>
-                  </TouchableOpacity>
-                  <TouchableOpacity
-                    style={[s.segmentBtn, expenseForm[type].paidBy === 'company' && s.segmentBtnCompany]}
-                    onPress={() => setExpenseForm(p => ({ ...p, [type]: { ...p[type], paidBy: 'company' } }))}
-                    activeOpacity={0.85}
-                  >
-                    <Building2 size={13} color={expenseForm[type].paidBy === 'company' ? colors.white : colors.textMuted} strokeWidth={2.3} />
-                    <Text style={[s.segmentText, expenseForm[type].paidBy === 'company' && s.segmentTextActive]}>Company</Text>
-                  </TouchableOpacity>
+                <Text style={s.fieldLabel}>Amount paid</Text>
+                <View style={s.payerRow}>
+                  <PayerInput
+                    icon={<User size={12} color={colors.primary} strokeWidth={2.4} />}
+                    label="Driver"
+                    tint={colors.primary}
+                    value={expenseForm[type].driverAmount}
+                    onChangeText={v => setExpenseForm(p => ({ ...p, [type]: { ...p[type], driverAmount: v } }))}
+                  />
+                  <PayerInput
+                    icon={<Building2 size={12} color={colors.info} strokeWidth={2.4} />}
+                    label="Company"
+                    tint={colors.info}
+                    value={expenseForm[type].companyAmount}
+                    onChangeText={v => setExpenseForm(p => ({ ...p, [type]: { ...p[type], companyAmount: v } }))}
+                  />
                 </View>
+                {typedTotal(type) > 0 ? (
+                  <View style={s.blockTotal}>
+                    <Text style={s.blockTotalLabel}>Total</Text>
+                    <Text style={s.blockTotalValue}>{formatINR(typedTotal(type))}</Text>
+                  </View>
+                ) : null}
               </View>
             );
           })}
@@ -241,8 +329,36 @@ export default function AccountsVisitDetailScreen() {
             <TotalRow label="Rejected Amount" value={expense.rejectedAmount} color={colors.danger} last />
           </View>
         )}
-      </ScrollView>
+      </KeyboardAwareScrollView>
     </SafeAreaView>
+  );
+}
+
+/** One payer's share of a single expense. Blank means that side paid nothing. */
+function PayerInput({
+  icon, label, tint, value, onChangeText,
+}: {
+  icon: React.ReactNode; label: string; tint: string;
+  value: string; onChangeText: (v: string) => void;
+}) {
+  return (
+    <View style={s.payerCol}>
+      <View style={s.payerLabelRow}>
+        {icon}
+        <Text style={[s.payerLabel, { color: tint }]}>{label}</Text>
+      </View>
+      <View style={s.amountWrap}>
+        <Text style={s.rupee}>₹</Text>
+        <TextInput
+          style={s.amountInput}
+          placeholder="0"
+          placeholderTextColor={colors.textFaint}
+          keyboardType="numeric"
+          value={value}
+          onChangeText={onChangeText}
+        />
+      </View>
+    </View>
   );
 }
 
@@ -369,18 +485,19 @@ const s = StyleSheet.create({
     fontFamily: fonts.medium, fontSize: 14, color: colors.text, backgroundColor: colors.surface,
   },
 
-  segment: {
-    flexDirection: 'row', gap: 4, padding: 3,
-    backgroundColor: colors.surfaceAlt, borderRadius: radius.md,
+  payerRow: { flexDirection: 'row', gap: spacing.sm },
+  payerCol: { flex: 1 },
+  payerLabelRow: { flexDirection: 'row', alignItems: 'center', gap: 4, marginBottom: 5 },
+  payerLabel: { fontFamily: fonts.bold, fontSize: 11, letterSpacing: 0.2 },
+  payerHint: { fontFamily: fonts.regular, fontSize: 11.5, lineHeight: 17, color: colors.textMuted, marginBottom: spacing.md },
+
+  blockTotal: {
+    flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between',
+    marginTop: spacing.sm, paddingTop: spacing.sm,
+    borderTopWidth: 1, borderTopColor: colors.borderSoft,
   },
-  segmentBtn: {
-    flex: 1, flexDirection: 'row', alignItems: 'center', justifyContent: 'center',
-    gap: 5, paddingVertical: 9, borderRadius: radius.sm,
-  },
-  segmentBtnActive: { backgroundColor: colors.primary },
-  segmentBtnCompany: { backgroundColor: colors.info },
-  segmentText: { fontFamily: fonts.semibold, fontSize: 12.5, color: colors.textMuted },
-  segmentTextActive: { color: colors.white, fontFamily: fonts.bold },
+  blockTotalLabel: { fontFamily: fonts.semibold, fontSize: 12, color: colors.textMuted },
+  blockTotalValue: { fontFamily: fonts.extrabold, fontSize: 15, letterSpacing: -0.2, color: colors.text },
 
   saveBtn: {
     backgroundColor: colors.primary, borderRadius: radius.md,

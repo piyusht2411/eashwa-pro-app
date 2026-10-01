@@ -55,6 +55,24 @@ export const formatDate = (iso: string | Date | undefined | null): string => {
   });
 };
 
+/** `"14:05"` → `2:05 PM`. Blank for a missing or malformed time. */
+export const formatTime12h = (time?: string | null): string => {
+  const match = /^(\d{1,2}):(\d{2})$/.exec(time ?? "");
+  if (!match) return "";
+  const h = Number(match[1]);
+  return `${h % 12 || 12}:${match[2]} ${h < 12 ? "AM" : "PM"}`;
+};
+
+/** `12 Mar 2026, 9:30 AM` when a time was picked, otherwise just the date. */
+export const formatVisitWhen = (
+  iso: string | Date | undefined | null,
+  time?: string | null,
+): string => {
+  const date = formatDate(iso);
+  const clock = formatTime12h(time);
+  return clock && date !== "—" ? `${date}, ${clock}` : date;
+};
+
 /** `12 Mar – 15 Mar 2026`, collapsing the repeated year/month where possible. */
 export const formatDateRange = (
   start: string | Date | undefined | null,

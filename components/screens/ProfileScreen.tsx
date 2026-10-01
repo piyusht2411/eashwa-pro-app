@@ -1,7 +1,6 @@
 import React from 'react';
 import { Alert, ScrollView, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
-import { router } from 'expo-router';
 import { LinearGradient } from 'expo-linear-gradient';
 import { ChevronRight, LogOut, Mail } from 'lucide-react-native';
 
@@ -42,7 +41,8 @@ export function ProfileScreen({
       {
         text: 'Log out',
         style: 'destructive',
-        onPress: async () => { await logout(); router.replace('/(auth)/login'); },
+        // Clearing the session is enough — the root guard shows the login screen.
+        onPress: () => { void logout(); },
       },
     ]);
 

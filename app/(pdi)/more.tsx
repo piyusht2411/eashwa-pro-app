@@ -40,10 +40,8 @@ export default function PdiMore() {
       {
         text: "Log out",
         style: "destructive",
-        onPress: async () => {
-          await logout();
-          router.replace("/(auth)/login");
-        },
+        // Clearing the session is enough — the root guard shows the login screen.
+        onPress: () => { void logout(); },
       },
     ]);
   };

@@ -3,19 +3,10 @@ import { Input } from "@/components/ui/Input";
 import { colors, fonts, radius, shadow } from "@/lib/theme";
 import { useAuthStore } from "@/stores/authStore";
 import { LinearGradient } from "expo-linear-gradient";
-import { router } from "expo-router";
 import { Lock, Mail } from "lucide-react-native";
 import { useState } from "react";
-import {
-  Alert,
-  Image,
-  KeyboardAvoidingView,
-  Platform,
-  ScrollView,
-  StyleSheet,
-  Text,
-  View,
-} from "react-native";
+import { Alert, Image, StyleSheet, Text, View } from "react-native";
+import { KeyboardAwareScrollView } from "react-native-keyboard-controller";
 import { SafeAreaView, useSafeAreaInsets } from "react-native-safe-area-context";
 
 export default function Login() {
@@ -39,9 +30,9 @@ export default function Login() {
     setLoading(true);
     try {
       const res = await login(em, pass);
-      if (res.success) {
-        router.replace("/");
-      } else {
+      // On success the root guard moves to the right dashboard. Navigating from
+      // here as well would fire a second, racing navigation.
+      if (!res.success) {
         Alert.alert("Login Failed", res.error ?? "Invalid credentials");
       }
     } catch (error: any) {
@@ -63,17 +54,14 @@ export default function Login() {
       <View style={s.blob2} />
 
       <SafeAreaView style={s.safe} edges={["top", "bottom"]}>
-        <KeyboardAvoidingView
-          behavior={Platform.OS === "ios" ? "padding" : "height"}
-          keyboardVerticalOffset={Platform.OS === "ios" ? 0 : 24}
+        <KeyboardAwareScrollView
           style={s.flex}
+          contentContainerStyle={[s.scroll, { paddingBottom: insets.bottom + 40 }]}
+          bottomOffset={24}
+          keyboardShouldPersistTaps="handled"
+          keyboardDismissMode="interactive"
+          showsVerticalScrollIndicator={false}
         >
-          <ScrollView
-            contentContainerStyle={[s.scroll, { paddingBottom: insets.bottom + 240 }]}
-            keyboardShouldPersistTaps="handled"
-            keyboardDismissMode="interactive"
-            showsVerticalScrollIndicator={false}
-          >
             <View style={s.header}>
               <View style={s.logoWrap}>
                 <View style={s.logoInner}>
@@ -127,8 +115,7 @@ export default function Login() {
             </View>
 
             <Text style={s.footer}>Secure access · Powered by Eashwa</Text>
-          </ScrollView>
-        </KeyboardAvoidingView>
+        </KeyboardAwareScrollView>
       </SafeAreaView>
     </View>
   );

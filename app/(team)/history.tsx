@@ -10,9 +10,7 @@ import {
   ActivityIndicator,
   Alert,
   FlatList,
-  KeyboardAvoidingView,
   Modal,
-  Platform,
   Pressable,
   ScrollView,
   StyleSheet,
@@ -22,6 +20,7 @@ import {
   View,
 } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
+import { KeyboardAvoidingView } from "react-native-keyboard-controller";
 
 function formatDate(iso: string) {
   const d = new Date(iso);
@@ -309,10 +308,10 @@ export default function TeamHistory() {
       )}
 
       {/* Edit log modal */}
-      <Modal visible={!!editingLog} transparent animationType="slide" onRequestClose={closeEdit}>
+      <Modal visible={!!editingLog} transparent animationType="slide" onRequestClose={closeEdit} statusBarTranslucent navigationBarTranslucent>
         <View style={s.overlay}>
           <KeyboardAvoidingView
-            behavior={Platform.OS === "ios" ? "padding" : "height"}
+            behavior="padding"
             style={{ width: "100%" }}
           >
             <View style={s.modal}>

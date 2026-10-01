@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useState } from 'react';
+import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { ActivityIndicator, ScrollView, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { router, useLocalSearchParams } from 'expo-router';
@@ -8,33 +8,47 @@ import { LinearGradient } from 'expo-linear-gradient';
 import { getVisitById } from '@/lib/api';
 import { useAuthStore } from '@/stores/authStore';
 import { colors, fonts, gradients, radius, shadow, spacing } from '@/lib/theme';
-import { formatCount, formatDate, formatDays, formatINR, formatKm } from '@/lib/format';
+import { formatCount, formatDays, formatINR, formatKm, formatVisitWhen } from '@/lib/format';
+import { companyAmountOf, driverAmountOf, itemTotal } from '@/lib/expense';
 import StatusPill from '@/components/ui/StatusPill';
-import ExpenseTypeBadge from '@/components/ui/ExpenseTypeBadge';
+import ExpenseTypeBadge, { EXPENSE_TYPES, expenseLabel } from '@/components/ui/ExpenseTypeBadge';
 import type { Expense, Visit } from '@/types';
-
-const TYPES = ['food', 'cng', 'other'] as const;
 
 export default function DriverVisitDetailScreen() {
   const { id } = useLocalSearchParams<{ id: string }>();
   const { token } = useAuthStore();
   const [visit, setVisit] = useState<Visit | null>(null);
   const [expense, setExpense] = useState<Expense | null>(null);
-  const [loading, setLoading] = useState(true);
+  // Which visit the state below belongs to. This screen sits inside a tab
+  // navigator, so opening another visit swaps the `id` param on the component
+  // that is already mounted rather than mounting a fresh one. Without this the
+  // previous visit stays on screen until the new one arrives.
+  const [loadedId, setLoadedId] = useState<string | null>(null);
+  const requestSeq = useRef(0);
 
   const load = useCallback(async () => {
     if (!token || !id) return;
+    const seq = ++requestSeq.current;
     try {
       const res = await getVisitById(id, token);
+      // Another visit was opened while this was in flight — drop the answer.
+      if (seq !== requestSeq.current) return;
       setVisit(res.visit);
       setExpense(res.expense);
-    } catch (e) { console.error(e); }
-    finally { setLoading(false); }
+    } catch (e) {
+      if (seq !== requestSeq.current) return;
+      console.error(e);
+      setVisit(null);
+      setExpense(null);
+    } finally {
+      if (seq === requestSeq.current) setLoadedId(id);
+    }
   }, [token, id]);
 
   useEffect(() => { load(); }, [load]);
 
-  if (loading) {
+  // Show the spinner until the data on screen is this visit's, not the last one's.
+  if (loadedId !== id) {
     return (
       <SafeAreaView style={s.centered}>
         <ActivityIndicator size="large" color={colors.primary} />
@@ -48,6 +62,9 @@ export default function DriverVisitDetailScreen() {
       </SafeAreaView>
     );
   }
+
+  // Only the types that carry money — six "₹0" rows would bury the real ones.
+  const recordedTypes = expense ? EXPENSE_TYPES.filter(t => itemTotal(expense[t]) > 0) : [];
 
   return (
     <SafeAreaView style={s.root} edges={['top']}>
@@ -76,8 +93,8 @@ export default function DriverVisitDetailScreen() {
         <View style={s.section}>
           <Text style={s.sectionTitle}>Trip Information</Text>
           <InfoRow icon={<MapPin size={14} color={colors.textMuted} />} label="Destination" value={visit.destination} />
-          <InfoRow icon={<CalendarDays size={14} color={colors.textMuted} />} label="Start Date" value={formatDate(visit.startDate)} />
-          <InfoRow icon={<CalendarDays size={14} color={colors.textMuted} />} label="End Date" value={formatDate(visit.endDate)} />
+          <InfoRow icon={<CalendarDays size={14} color={colors.textMuted} />} label="Start" value={formatVisitWhen(visit.startDate, visit.startTime)} />
+          <InfoRow icon={<CalendarDays size={14} color={colors.textMuted} />} label="End" value={formatVisitWhen(visit.endDate, visit.endTime)} />
           {visit.billNumber ? (
             <InfoRow icon={<FileText size={14} color={colors.textMuted} />} label="Bill No." value={visit.billNumber} last />
           ) : null}
@@ -87,22 +104,35 @@ export default function DriverVisitDetailScreen() {
           <>
             <View style={s.section}>
               <Text style={s.sectionTitle}>Expense Status</Text>
-              {TYPES.map((type, i) => {
+              {recordedTypes.length === 0 ? (
+                <Text style={s.emptyText}>No amounts recorded yet.</Text>
+              ) : null}
+              {recordedTypes.map((type, i) => {
                 const item = expense[type];
-                const company = item?.paidBy === 'company';
+                const youPaid = driverAmountOf(item);
+                const companyPaid = companyAmountOf(item);
                 return (
-                  <View key={type} style={[s.expRow, i === TYPES.length - 1 && s.rowLast]}>
+                  <View key={type} style={[s.expRow, i === recordedTypes.length - 1 && s.rowLast]}>
                     <View style={s.expLeft}>
                       <ExpenseTypeBadge type={type} />
-                      <Text style={s.expAmount}>{formatINR(item?.amount)}</Text>
-                      <View style={s.paidByChip}>
-                        {company
-                          ? <Building2 size={11} color={colors.info} strokeWidth={2.3} />
-                          : <User size={11} color={colors.textMuted} strokeWidth={2.3} />}
-                        <Text style={[s.paidByText, company && { color: colors.info }]}>
-                          {company ? 'Paid by company' : 'Paid by you'}
-                        </Text>
-                      </View>
+                      <Text style={s.expAmount}>{formatINR(itemTotal(item))}</Text>
+                      {/* A single bill can be part yours, part the company's. */}
+                      {youPaid > 0 ? (
+                        <View style={s.paidByChip}>
+                          <User size={11} color={colors.primary} strokeWidth={2.3} />
+                          <Text style={[s.paidByText, { color: colors.primary }]}>
+                            You paid {formatINR(youPaid)}
+                          </Text>
+                        </View>
+                      ) : null}
+                      {companyPaid > 0 ? (
+                        <View style={s.paidByChip}>
+                          <Building2 size={11} color={colors.info} strokeWidth={2.3} />
+                          <Text style={[s.paidByText, { color: colors.info }]}>
+                            Company paid {formatINR(companyPaid)}
+                          </Text>
+                        </View>
+                      ) : null}
                     </View>
                     <StatusPill status={item?.status ?? 'pending'} />
                   </View>
@@ -128,14 +158,14 @@ export default function DriverVisitDetailScreen() {
               ) : null}
             </View>
 
-            {TYPES.some(t => expense[t]?.rejectionRemark) ? (
+            {EXPENSE_TYPES.some(t => expense[t]?.rejectionRemark) ? (
               <View style={s.section}>
                 <Text style={s.sectionTitle}>Rejection Reasons</Text>
-                {TYPES.map(type =>
+                {EXPENSE_TYPES.map(type =>
                   expense[type]?.rejectionRemark ? (
                     <View key={type} style={s.remarkBox}>
-                      <Text style={s.remarkLabel}>{type} rejected</Text>
-                      <Text style={s.remarkText}>{expense[type].rejectionRemark}</Text>
+                      <Text style={s.remarkLabel}>{expenseLabel(type)} rejected</Text>
+                      <Text style={s.remarkText}>{expense[type]?.rejectionRemark}</Text>
                     </View>
                   ) : null
                 )}

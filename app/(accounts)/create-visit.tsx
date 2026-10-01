@@ -1,10 +1,8 @@
-import React, { useEffect, useMemo, useState } from "react";
+import React, { useCallback, useEffect, useMemo, useState } from "react";
 import {
   ActivityIndicator,
   Alert,
-  KeyboardAvoidingView,
   Modal,
-  Platform,
   ScrollView,
   StyleSheet,
   Text,
@@ -13,13 +11,15 @@ import {
   View,
 } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
-import { router } from "expo-router";
+import { KeyboardAwareScrollView } from "react-native-keyboard-controller";
+import { router, useFocusEffect, useLocalSearchParams } from "expo-router";
 import {
   ArrowLeft,
   CalendarDays,
   ChevronDown,
   ChevronLeft,
   ChevronRight,
+  Clock,
   FileText,
   Gauge,
   MapPin,
@@ -31,11 +31,11 @@ import {
 } from "lucide-react-native";
 import { LinearGradient } from "expo-linear-gradient";
 
-import { createVisit, getAllDrivers } from "@/lib/api";
+import { createVisit, getAllDrivers, getVisitById, updateVisit } from "@/lib/api";
 import { useAuthStore } from "@/stores/authStore";
 import { colors, fonts, gradients, radius, shadow, spacing } from "@/lib/theme";
-import { formatDays } from "@/lib/format";
-import type { Driver } from "@/types";
+import { formatDays, formatTime12h } from "@/lib/format";
+import type { Driver, Visit } from "@/types";
 
 // ─── Custom Pure-RN Orange Calendar ──────────────────────────────────────────
 
@@ -266,27 +266,284 @@ const cal = StyleSheet.create({
   okText: { fontFamily: fonts.bold, fontSize: 14, color: colors.white },
 });
 
+// ─── Custom Pure-RN Time Picker (12-hour) ────────────────────────────────────
+
+const HOURS_12 = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12];
+const MINUTES = [0, 5, 10, 15, 20, 25, 30, 35, 40, 45, 50, 55];
+
+/** "HH:mm" (24h) → its 12-hour parts. */
+function splitTime(value: string): { hour: number; minute: number; period: "AM" | "PM" } | null {
+  const match = /^(\d{2}):(\d{2})$/.exec(value);
+  if (!match) return null;
+  const h = Number(match[1]);
+  return { hour: h % 12 || 12, minute: Number(match[2]), period: h < 12 ? "AM" : "PM" };
+}
+
+/** 12-hour parts → "HH:mm" (24h), the shape the API stores. */
+function joinTime(hour: number, minute: number, period: "AM" | "PM"): string {
+  const h = (hour % 12) + (period === "PM" ? 12 : 0);
+  return `${String(h).padStart(2, "0")}:${String(minute).padStart(2, "0")}`;
+}
+
+function TimePicker({
+  visible,
+  title,
+  value,
+  onConfirm,
+  onClear,
+  onDismiss,
+}: {
+  visible: boolean;
+  title: string;
+  value: string;       // "HH:mm" (24h) or ""
+  onConfirm: (time: string) => void;
+  onClear: () => void;
+  onDismiss: () => void;
+}) {
+  const [hour, setHour] = useState<number | null>(null);
+  const [minute, setMinute] = useState<number>(0);
+  const [period, setPeriod] = useState<"AM" | "PM">("AM");
+
+  // Sync state every time modal opens
+  useEffect(() => {
+    if (!visible) return;
+    const parts = splitTime(value);
+    setHour(parts?.hour ?? null);
+    setMinute(parts?.minute ?? 0);
+    setPeriod(parts?.period ?? "AM");
+  }, [visible, value]);
+
+  // A stored minute off the 5-minute grid stays selectable as-is.
+  const minuteOptions = MINUTES.includes(minute) ? MINUTES : [...MINUTES, minute].sort((a, b) => a - b);
+  const label = hour === null
+    ? "Pick an hour"
+    : formatTime12h(joinTime(hour, minute, period));
+
+  return (
+    <Modal visible={visible} transparent animationType="fade" onRequestClose={onDismiss}>
+      <View style={cal.overlay}>
+        <View style={cal.card}>
+          <LinearGradient colors={gradients.brandDeep} start={{ x: 0, y: 0 }} end={{ x: 1, y: 1 }} style={cal.header}>
+            <Text style={cal.headerLabel}>{title}</Text>
+            <Text style={cal.headerDate}>{label}</Text>
+          </LinearGradient>
+
+          <View style={tp.body}>
+            <View style={tp.periodRow}>
+              {(["AM", "PM"] as const).map((p) => (
+                <TouchableOpacity
+                  key={p}
+                  style={[tp.period, period === p && tp.periodSel]}
+                  onPress={() => setPeriod(p)}
+                  activeOpacity={0.85}
+                >
+                  <Text style={[tp.periodText, period === p && tp.periodTextSel]}>{p}</Text>
+                </TouchableOpacity>
+              ))}
+            </View>
+
+            <Text style={tp.groupLabel}>Hour</Text>
+            <View style={tp.grid}>
+              {HOURS_12.map((h) => (
+                <TouchableOpacity
+                  key={h}
+                  style={tp.cell}
+                  onPress={() => setHour(h)}
+                  activeOpacity={0.75}
+                >
+                  <Text style={[tp.cellText, hour === h && tp.cellTextSel]}>{h}</Text>
+                </TouchableOpacity>
+              ))}
+            </View>
+
+            <Text style={tp.groupLabel}>Minute</Text>
+            <View style={tp.grid}>
+              {minuteOptions.map((m) => (
+                <TouchableOpacity
+                  key={m}
+                  style={tp.cell}
+                  onPress={() => setMinute(m)}
+                  activeOpacity={0.75}
+                >
+                  <Text style={[tp.cellText, minute === m && tp.cellTextSel]}>
+                    :{String(m).padStart(2, "0")}
+                  </Text>
+                </TouchableOpacity>
+              ))}
+            </View>
+          </View>
+
+          <View style={cal.actions}>
+            {value ? (
+              <TouchableOpacity style={cal.cancelBtn} onPress={onClear} activeOpacity={0.85}>
+                <Text style={[cal.cancelText, { color: colors.danger }]}>Clear</Text>
+              </TouchableOpacity>
+            ) : (
+              <TouchableOpacity style={cal.cancelBtn} onPress={onDismiss} activeOpacity={0.85}>
+                <Text style={cal.cancelText}>Cancel</Text>
+              </TouchableOpacity>
+            )}
+            <TouchableOpacity
+              style={[cal.okBtn, hour === null && cal.okDisabled]}
+              onPress={() => hour !== null && onConfirm(joinTime(hour, minute, period))}
+              activeOpacity={0.85}
+              disabled={hour === null}
+            >
+              <Text style={cal.okText}>Confirm</Text>
+            </TouchableOpacity>
+          </View>
+        </View>
+      </View>
+    </Modal>
+  );
+}
+
+const tp = StyleSheet.create({
+  body: { paddingHorizontal: spacing.lg, paddingTop: spacing.lg },
+  periodRow: {
+    flexDirection: "row",
+    backgroundColor: colors.bgMuted,
+    borderRadius: radius.md,
+    borderWidth: 1,
+    borderColor: colors.border,
+    padding: 3,
+  },
+  period: { flex: 1, alignItems: "center", paddingVertical: 9, borderRadius: radius.sm },
+  periodSel: { backgroundColor: colors.primary },
+  periodText: { fontFamily: fonts.bold, fontSize: 13.5, color: colors.textSecondary, letterSpacing: 0.5 },
+  periodTextSel: { color: colors.white },
+  groupLabel: {
+    fontFamily: fonts.semibold,
+    fontSize: 11,
+    letterSpacing: 0.4,
+    textTransform: "uppercase",
+    color: colors.textFaint,
+    marginTop: spacing.md,
+    marginBottom: 6,
+  },
+  grid: { flexDirection: "row", flexWrap: "wrap", marginHorizontal: -3 },
+  cell: {
+    width: "25%",
+    paddingHorizontal: 3,
+    paddingVertical: 3,
+  },
+  cellText: {
+    fontFamily: fonts.semibold,
+    fontSize: 14,
+    color: colors.text,
+    textAlign: "center",
+    paddingVertical: 9,
+    borderRadius: radius.sm,
+    borderWidth: 1,
+    borderColor: colors.borderSoft,
+    overflow: "hidden",
+  },
+  cellTextSel: {
+    color: colors.white,
+    fontFamily: fonts.bold,
+    backgroundColor: colors.primary,
+    borderColor: colors.primary,
+  },
+});
+
 // ─── Main Screen ──────────────────────────────────────────────────────────────
 
+const emptyForm = () => ({
+  destination: "",
+  startDate: "",
+  endDate: "",
+  startTime: "",   // "HH:mm" (24h) — optional
+  endTime: "",     // "HH:mm" (24h) — optional
+  quantity: "",
+  billNumber: "",
+  distance: "",
+  vehicleNumber: "",
+});
+
+/** Stored instant → "YYYY-MM-DD" on the device calendar (IST), as the pickers use. */
+function toYmd(iso: string): string {
+  const d = new Date(iso);
+  if (Number.isNaN(d.getTime())) return "";
+  return [
+    d.getFullYear(),
+    String(d.getMonth() + 1).padStart(2, "0"),
+    String(d.getDate()).padStart(2, "0"),
+  ].join("-");
+}
+
+/** Prefill the form from a saved visit. */
+function formFromVisit(v: Visit) {
+  return {
+    destination: v.destination ?? "",
+    startDate: toYmd(v.startDate),
+    endDate: toYmd(v.endDate),
+    startTime: v.startTime ?? "",
+    endTime: v.endTime ?? "",
+    quantity: v.quantity ? String(v.quantity) : "",
+    billNumber: v.billNumber ?? "",
+    distance: v.distance ? String(v.distance) : "",
+    vehicleNumber: v.vehicleNumber ?? "",
+  };
+}
+
+/** Doubles as the edit screen when opened with `?id=<visitId>` (accounts only). */
 export default function CreateVisitScreen() {
+  const { id } = useLocalSearchParams<{ id?: string }>();
+  const isEdit = Boolean(id);
   const { token } = useAuthStore();
   const [drivers, setDrivers] = useState<Driver[]>([]);
   const [selectedDriver, setSelectedDriver] = useState<Driver | null>(null);
   const [showDriverPicker, setShowDriverPicker] = useState(false);
   const [driverSearch, setDriverSearch] = useState("");
   const [showDatePicker, setShowDatePicker] = useState<"start" | "end" | null>(null);
+  const [showTimePicker, setShowTimePicker] = useState<"start" | "end" | null>(null);
   const [driversLoading, setDriversLoading] = useState(true);
   const [driverFetchError, setDriverFetchError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
-  const [form, setForm] = useState({
-    destination: "",
-    startDate: "",
-    endDate: "",
-    quantity: "",
-    billNumber: "",
-    distance: "",
-    vehicleNumber: "",
-  });
+  const [form, setForm] = useState(emptyForm);
+  // Edit mode: which visit the form currently holds. The screen sits in a tab
+  // navigator and stays mounted, so the `id` param can change underneath it.
+  const [loadedId, setLoadedId] = useState<string | null>(null);
+  const [loadError, setLoadError] = useState<string | null>(null);
+
+  // The screen stays mounted inside the tab navigator, so state outlives a
+  // visit to it. Each time it comes into view: start blank (create) or load
+  // the visit fresh (edit). Each time it is left — back button, saved, or
+  // another tab — throw away whatever was typed.
+  useFocusEffect(
+    useCallback(() => {
+      let cancelled = false;
+      if (id && token) {
+        setLoadedId(null);
+        setLoadError(null);
+        getVisitById(id, token)
+          .then((res) => {
+            if (cancelled) return;
+            setForm(formFromVisit(res.visit));
+            setSelectedDriver(typeof res.visit.driver === "object" ? (res.visit.driver as Driver) : null);
+            setLoadedId(id);
+          })
+          .catch((e) => { if (!cancelled) setLoadError(e?.message || "Failed to load visit"); });
+      }
+      return () => {
+        cancelled = true;
+        setForm(emptyForm());
+        setSelectedDriver(null);
+        setDriverSearch("");
+        setShowDriverPicker(false);
+        setShowDatePicker(null);
+        setShowTimePicker(null);
+        setLoadedId(null);
+        setLoadError(null);
+      };
+    }, [id, token]),
+  );
+
+  const goBack = () => {
+    // Tabs keep no history stack, so return to the visit explicitly.
+    if (isEdit) router.navigate({ pathname: "/(accounts)/visit-detail" as any, params: { id } });
+    else router.back();
+  };
 
   useEffect(() => {
     if (!token) return;
@@ -319,6 +576,11 @@ export default function CreateVisitScreen() {
     if (!token) return;
     const days = calcDays();
     if (days <= 0) { Alert.alert("Invalid", "End date must be on or after start date"); return; }
+    // "HH:mm" strings compare correctly as text.
+    if (days === 1 && form.startTime && form.endTime && form.endTime < form.startTime) {
+      Alert.alert("Invalid", "End time must be after start time on a same-day visit");
+      return;
+    }
 
     // A driver may have no vehicle assigned, so the visit needs one entered here.
     const vehicleNumber = (form.vehicleNumber.trim() || selectedDriver.vehicleNumber || "").toUpperCase();
@@ -329,22 +591,38 @@ export default function CreateVisitScreen() {
 
     setLoading(true);
     try {
-      await createVisit(
-        {
-          driverId: selectedDriver._id,
-          destination: form.destination.trim(),
-          startDate: form.startDate,
-          endDate: form.endDate,
-          quantity: parseFloat(form.quantity) || 0,
-          billNumber: form.billNumber.trim(),
-          distance: parseFloat(form.distance) || 0,
-          vehicleNumber,
-        },
-        token,
-      );
-      Alert.alert("Success", "Visit created successfully!", [
-        { text: "OK", onPress: () => router.back() },
-      ]);
+      const payload = {
+        driverId: selectedDriver._id,
+        destination: form.destination.trim(),
+        startDate: form.startDate,
+        endDate: form.endDate,
+        quantity: parseFloat(form.quantity) || 0,
+        billNumber: form.billNumber.trim(),
+        distance: parseFloat(form.distance) || 0,
+        vehicleNumber,
+      };
+      if (isEdit && id) {
+        // "" clears a time that was set before.
+        await updateVisit(id, { ...payload, startTime: form.startTime, endTime: form.endTime }, token);
+        Alert.alert("Saved", "Visit updated successfully!", [{ text: "OK", onPress: goBack }]);
+      } else {
+        await createVisit(
+          {
+            ...payload,
+            startTime: form.startTime || undefined,
+            endTime: form.endTime || undefined,
+          },
+          token,
+        );
+        // The screen stays mounted inside the tab navigator, so wipe it now —
+        // otherwise the next "Create Visit" opens with this visit's details.
+        setForm(emptyForm());
+        setSelectedDriver(null);
+        setDriverSearch("");
+        Alert.alert("Success", "Visit created successfully!", [
+          { text: "OK", onPress: () => router.back() },
+        ]);
+      }
     } catch (e: any) {
       Alert.alert("Error", e.message);
     } finally {
@@ -375,23 +653,29 @@ export default function CreateVisitScreen() {
     <SafeAreaView style={s.root} edges={["top"]}>
       <LinearGradient colors={gradients.brandDeep} start={{ x: 0, y: 0 }} end={{ x: 1, y: 1 }} style={s.header}>
         <View style={s.headerBar}>
-          <TouchableOpacity style={s.back} onPress={() => router.back()} hitSlop={8}>
+          <TouchableOpacity style={s.back} onPress={goBack} hitSlop={8}>
             <ArrowLeft size={20} color={colors.white} strokeWidth={2.4} />
           </TouchableOpacity>
-          <Text style={s.headerEyebrow}>New Entry</Text>
+          <Text style={s.headerEyebrow}>{isEdit ? "Update Entry" : "New Entry"}</Text>
         </View>
-        <Text style={s.headerTitle}>Create Visit</Text>
+        <Text style={s.headerTitle}>{isEdit ? "Edit Visit" : "Create Visit"}</Text>
       </LinearGradient>
 
-      <KeyboardAvoidingView
+      {isEdit && loadedId !== id ? (
+        <View style={s.loadingWrap}>
+          {loadError
+            ? <Text style={s.loadErrorText}>{loadError}</Text>
+            : <ActivityIndicator size="large" color={colors.primary} />}
+        </View>
+      ) : (
+
+      <KeyboardAwareScrollView
         style={s.flex}
-        behavior={Platform.OS === "ios" ? "padding" : undefined}
+        contentContainerStyle={s.body}
+        bottomOffset={24}
+        showsVerticalScrollIndicator={false}
+        keyboardShouldPersistTaps="handled"
       >
-        <ScrollView
-          contentContainerStyle={s.body}
-          showsVerticalScrollIndicator={false}
-          keyboardShouldPersistTaps="handled"
-        >
           {/* ── Driver ─────────────────────────────────────────────────── */}
           <View style={s.card}>
             <Text style={s.cardTitle}>Driver</Text>
@@ -462,6 +746,16 @@ export default function CreateVisitScreen() {
                     {form.startDate ? prettyDate(form.startDate) : "Select"}
                   </Text>
                 </TouchableOpacity>
+                <TouchableOpacity
+                  style={[s.timeBtn, form.startTime && s.dateBtnFilled]}
+                  onPress={() => setShowTimePicker("start")}
+                  activeOpacity={0.85}
+                >
+                  <Clock size={13} color={form.startTime ? colors.primaryDark : colors.textFaint} strokeWidth={2.3} />
+                  <Text style={[s.dateText, !form.startTime && s.datePlaceholder]} numberOfLines={1}>
+                    {form.startTime ? formatTime12h(form.startTime) : "Add time"}
+                  </Text>
+                </TouchableOpacity>
               </View>
 
               <View style={s.dateCol}>
@@ -474,6 +768,16 @@ export default function CreateVisitScreen() {
                   <CalendarDays size={14} color={form.endDate ? colors.primaryDark : colors.textFaint} strokeWidth={2.3} />
                   <Text style={[s.dateText, !form.endDate && s.datePlaceholder]} numberOfLines={1}>
                     {form.endDate ? prettyDate(form.endDate) : "Select"}
+                  </Text>
+                </TouchableOpacity>
+                <TouchableOpacity
+                  style={[s.timeBtn, form.endTime && s.dateBtnFilled]}
+                  onPress={() => setShowTimePicker("end")}
+                  activeOpacity={0.85}
+                >
+                  <Clock size={13} color={form.endTime ? colors.primaryDark : colors.textFaint} strokeWidth={2.3} />
+                  <Text style={[s.dateText, !form.endTime && s.datePlaceholder]} numberOfLines={1}>
+                    {form.endTime ? formatTime12h(form.endTime) : "Add time"}
                   </Text>
                 </TouchableOpacity>
               </View>
@@ -554,11 +858,11 @@ export default function CreateVisitScreen() {
             {loading ? (
               <ActivityIndicator color={colors.white} size="small" />
             ) : (
-              <Text style={s.submitText}>Create Visit</Text>
+              <Text style={s.submitText}>{isEdit ? "Save Changes" : "Create Visit"}</Text>
             )}
           </TouchableOpacity>
-        </ScrollView>
-      </KeyboardAvoidingView>
+      </KeyboardAwareScrollView>
+      )}
 
       {/* ── Driver picker sheet ──────────────────────────────────────── */}
       <Modal
@@ -636,6 +940,22 @@ export default function CreateVisitScreen() {
         onConfirm={(date) => { setForm((p) => ({ ...p, startDate: date })); setShowDatePicker(null); }}
         onDismiss={() => setShowDatePicker(null)}
       />
+      <TimePicker
+        visible={showTimePicker === "start"}
+        title="Start Time"
+        value={form.startTime}
+        onConfirm={(time) => { setForm((p) => ({ ...p, startTime: time })); setShowTimePicker(null); }}
+        onClear={() => { setForm((p) => ({ ...p, startTime: "" })); setShowTimePicker(null); }}
+        onDismiss={() => setShowTimePicker(null)}
+      />
+      <TimePicker
+        visible={showTimePicker === "end"}
+        title="End Time"
+        value={form.endTime}
+        onConfirm={(time) => { setForm((p) => ({ ...p, endTime: time })); setShowTimePicker(null); }}
+        onClear={() => { setForm((p) => ({ ...p, endTime: "" })); setShowTimePicker(null); }}
+        onDismiss={() => setShowTimePicker(null)}
+      />
       <CalendarPicker
         visible={showDatePicker === "end"}
         title="End Date"
@@ -694,6 +1014,8 @@ const s = StyleSheet.create({
   },
 
   body: { padding: spacing.lg, paddingBottom: spacing["4xl"] },
+  loadingWrap: { flex: 1, alignItems: "center", justifyContent: "center", padding: spacing.xl },
+  loadErrorText: { fontFamily: fonts.medium, fontSize: 14, color: colors.textMuted, textAlign: "center" },
 
   card: {
     backgroundColor: colors.surface,
@@ -797,6 +1119,19 @@ const s = StyleSheet.create({
     backgroundColor: colors.bgMuted,
   },
   dateBtnFilled: { borderColor: colors.primaryBorder, backgroundColor: colors.primarySofter },
+  timeBtn: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 6,
+    borderWidth: 1,
+    borderStyle: "dashed",
+    borderColor: colors.border,
+    borderRadius: radius.md,
+    paddingHorizontal: spacing.md,
+    paddingVertical: 9,
+    marginTop: 6,
+    backgroundColor: colors.surface,
+  },
   dateText: { flex: 1, fontFamily: fonts.semibold, fontSize: 12.5, color: colors.text },
   datePlaceholder: { fontFamily: fonts.medium, color: colors.textFaint },
 

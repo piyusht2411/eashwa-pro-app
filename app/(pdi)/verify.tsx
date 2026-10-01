@@ -8,9 +8,7 @@ import { useCallback, useEffect, useState } from "react";
 import {
   ActivityIndicator,
   Alert,
-  KeyboardAvoidingView,
   Modal,
-  Platform,
   Pressable,
   RefreshControl,
   ScrollView,
@@ -20,6 +18,7 @@ import {
   View,
 } from "react-native";
 import { SafeAreaView, useSafeAreaInsets } from "react-native-safe-area-context";
+import { KeyboardAvoidingView } from "react-native-keyboard-controller";
 
 const getLogContainerModel = (log: ProductionLog) =>
   typeof log.container === "string" ? "Job" : log.container.model ?? "Job";
@@ -362,9 +361,9 @@ export default function PdiVerify() {
       </ScrollView>
 
       {/* Edit incomplete modal */}
-      <Modal visible={!!editing} transparent animationType="slide" onRequestClose={closeEdit}>
+      <Modal visible={!!editing} transparent animationType="slide" onRequestClose={closeEdit} statusBarTranslucent navigationBarTranslucent>
         <View style={s.overlay}>
-          <KeyboardAvoidingView behavior={Platform.OS === "ios" ? "padding" : "height"} style={s.keyboardAvoid}>
+          <KeyboardAvoidingView behavior="padding" style={s.keyboardAvoid}>
             <View style={s.modal}>
               <ScrollView
                 keyboardShouldPersistTaps="handled"
@@ -450,9 +449,9 @@ export default function PdiVerify() {
         </View>
       </Modal>
 
-      <Modal visible={!!selected} transparent animationType="slide">
+      <Modal visible={!!selected} transparent animationType="slide" statusBarTranslucent navigationBarTranslucent>
         <View style={s.overlay}>
-          <KeyboardAvoidingView behavior={Platform.OS === "ios" ? "padding" : "height"} style={s.keyboardAvoid}>
+          <KeyboardAvoidingView behavior="padding" style={s.keyboardAvoid}>
             <View style={s.modal}>
               <ScrollView
                 keyboardShouldPersistTaps="handled"

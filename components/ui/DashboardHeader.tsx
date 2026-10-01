@@ -106,7 +106,7 @@ const s = StyleSheet.create({
     color: 'rgba(255,255,255,0.78)',
     marginTop: 3,
   },
-  right: { marginTop: 2 },
+  right: { marginTop: 2, flexShrink: 0 },
 });
 
 export default DashboardHeader;

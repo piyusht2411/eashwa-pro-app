@@ -18,6 +18,8 @@ import { getAllDrivers, createDriver } from '@/lib/api';
 import { useAuthStore } from '@/stores/authStore';
 import { colors, fonts, radius, shadow, spacing } from '@/lib/theme';
 import { formatCount } from '@/lib/format';
+import { KeyboardAvoidingView } from 'react-native-keyboard-controller';
+
 import SearchBar from '@/components/ui/SearchBar';
 import DriverCard from '@/components/ui/DriverCard';
 import EmptyState from '@/components/ui/EmptyState';
@@ -100,6 +102,10 @@ export default function AdminDriversScreen() {
         ) : null}
       </View>
 
+      {/* Android draws edge-to-edge, so the window does not shrink on its own
+          when the keyboard opens. Shrinking this region keeps the create form
+          and its button clear of it. */}
+      <KeyboardAvoidingView style={s.flex} behavior="padding">
       {showCreate && (
         <View style={s.createCard}>
           <View style={s.createHead}>
@@ -183,11 +189,13 @@ export default function AdminDriversScreen() {
           }
         />
       )}
+      </KeyboardAvoidingView>
     </SafeAreaView>
   );
 }
 
 const s = StyleSheet.create({
+  flex: { flex: 1 },
   root: { flex: 1, backgroundColor: colors.bgSubtle },
   topBar: { paddingHorizontal: spacing.lg, paddingTop: spacing.lg, paddingBottom: spacing.sm },
   titleRow: { flexDirection: 'row', alignItems: 'center', gap: spacing.sm },

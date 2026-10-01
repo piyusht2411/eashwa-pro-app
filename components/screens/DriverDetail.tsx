@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useState } from 'react';
+import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { ActivityIndicator, RefreshControl, ScrollView, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { router, useLocalSearchParams } from 'expo-router';
@@ -31,19 +31,38 @@ export function DriverDetail({ visitDetailPath }: { visitDetailPath: string }) {
   const { id } = useLocalSearchParams<{ id: string }>();
   const { token } = useAuthStore();
   const [data, setData] = useState<DriverSummary | null>(null);
-  const [loading, setLoading] = useState(true);
+  // Which driver the data on screen belongs to. This screen sits inside a tab
+  // navigator, so opening another driver swaps the `id` param on the component
+  // that is already mounted rather than mounting a fresh one. Without this the
+  // previous driver stays on screen until the new one arrives.
+  const [loadedId, setLoadedId] = useState<string | null>(null);
+  const requestSeq = useRef(0);
   const [refreshing, setRefreshing] = useState(false);
 
   const load = useCallback(async () => {
     if (!token || !id) return;
-    try { setData(await getDriverSummary(id, token)); }
-    catch (e) { console.error(e); }
-    finally { setLoading(false); setRefreshing(false); }
+    const seq = ++requestSeq.current;
+    try {
+      const summary = await getDriverSummary(id, token);
+      // Another driver was opened while this was in flight — drop the answer.
+      if (seq !== requestSeq.current) return;
+      setData(summary);
+    } catch (e) {
+      if (seq !== requestSeq.current) return;
+      console.error(e);
+      setData(null);
+    } finally {
+      if (seq === requestSeq.current) {
+        setLoadedId(id);
+        setRefreshing(false);
+      }
+    }
   }, [token, id]);
 
   useEffect(() => { load(); }, [load]);
 
-  if (loading) {
+  // Show the spinner until the data on screen is this driver's, not the last one's.
+  if (loadedId !== id) {
     return (
       <SafeAreaView style={s.centered}>
         <ActivityIndicator size="large" color={colors.primary} />

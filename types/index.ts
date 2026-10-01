@@ -6,7 +6,14 @@ export interface AppUser {
   _id: string;
   name: string;
   role: UserRole;
+  /** Portal the session is currently working in — this is what routing follows. */
   portal?: Portal;
+  /** Portal the account itself belongs to; unchanged by switching. */
+  homePortal?: Portal;
+  /** True for an admin who runs both portals from one account. */
+  crossPortalAccess?: boolean;
+  /** Portals this account may switch between. */
+  availablePortals?: Portal[];
   email?: string;
   phone?: string;
   teamId?: string;
@@ -87,7 +94,7 @@ export interface ContainerPayment {
 }
 
 // ─── Transport Specific Types ──────────────────────────────────────────
-export type PaidBy = 'driver' | 'company';
+export type PaidBy = 'driver' | 'company' | 'both';
 export type ExpenseStatus = 'pending' | 'approved' | 'rejected' | 'auto_approved';
 
 export interface Driver {
@@ -124,6 +131,10 @@ export interface Visit {
   destination: string;
   startDate: string;
   endDate: string;
+  /** "HH:mm" (24h) when a time was picked for the start; "" or absent for date-only. */
+  startTime?: string;
+  /** "HH:mm" (24h) when a time was picked for the end; "" or absent for date-only. */
+  endTime?: string;
   totalDays: number;
   quantity: number;
   billNumber: string;
@@ -134,9 +145,19 @@ export interface Visit {
   updatedAt?: string;
 }
 
+/** Keys of the per-type items on an {@link Expense}. */
+export type ExpenseType = 'food' | 'cng' | 'diesel' | 'fastTag' | 'border' | 'other';
+
 export interface ExpenseItem {
+  /** Portion the driver paid out of pocket — the reimbursable part. */
+  driverAmount: number;
+  /** Portion the company paid directly — needs no approval. */
+  companyAmount: number;
+  /** driverAmount + companyAmount. */
   amount: number;
+  /** Derived from which portions are non-zero. */
   paidBy: PaidBy;
+  /** Approval state of the DRIVER portion only. */
   status: ExpenseStatus;
   approvedBy?: { name: string } | null;
   rejectedBy?: { name: string } | null;
@@ -151,6 +172,10 @@ export interface Expense {
   driver: Driver | string;
   food: ExpenseItem;
   cng: ExpenseItem;
+  /** Absent on expenses saved before these types existed. */
+  diesel?: ExpenseItem;
+  fastTag?: ExpenseItem;
+  border?: ExpenseItem;
   other: ExpenseItem & { description: string };
   /** Approved / auto-approved amounts only. */
   totalExpense: number;

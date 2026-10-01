@@ -7,9 +7,7 @@ import { useEffect, useState } from "react";
 import {
   ActivityIndicator,
   Alert,
-  KeyboardAvoidingView,
   Modal,
-  Platform,
   Pressable,
   RefreshControl,
   ScrollView,
@@ -19,6 +17,7 @@ import {
   View,
 } from "react-native";
 import { SafeAreaView, useSafeAreaInsets } from "react-native-safe-area-context";
+import { KeyboardAvoidingView } from "react-native-keyboard-controller";
 
 const getTeamName = (container: Container) =>
   typeof container.assignedTeam === "string" ? "Team" : container.assignedTeam.name;
@@ -369,10 +368,10 @@ export default function AdminContainers() {
         <View style={{ height: 20 }} />
       </ScrollView>
 
-      <Modal visible={showModal} transparent animationType="slide">
+      <Modal visible={showModal} transparent animationType="slide" statusBarTranslucent navigationBarTranslucent>
         <View style={s.overlay}>
           <KeyboardAvoidingView
-            behavior={Platform.OS === "ios" ? "padding" : "height"}
+            behavior="padding"
             style={s.keyboardAvoid}
           >
             <View style={s.modal}>
@@ -447,9 +446,9 @@ export default function AdminContainers() {
       </Modal>
 
       {/* Edit penalty modal */}
-      <Modal visible={!!penaltyTarget} transparent animationType="slide" onRequestClose={closePenaltyEdit}>
+      <Modal visible={!!penaltyTarget} transparent animationType="slide" onRequestClose={closePenaltyEdit} statusBarTranslucent navigationBarTranslucent>
         <View style={s.overlay}>
-          <KeyboardAvoidingView behavior={Platform.OS === "ios" ? "padding" : "height"} style={s.keyboardAvoid}>
+          <KeyboardAvoidingView behavior="padding" style={s.keyboardAvoid}>
             <View style={s.modal}>
               <View style={s.modalHeader}>
                 <Text style={s.modalTitle}>Edit Hold</Text>
@@ -497,9 +496,9 @@ export default function AdminContainers() {
       </Modal>
 
       {/* Full edit container modal */}
-      <Modal visible={!!editTarget} transparent animationType="slide" onRequestClose={closeEdit}>
+      <Modal visible={!!editTarget} transparent animationType="slide" onRequestClose={closeEdit} statusBarTranslucent navigationBarTranslucent>
         <View style={s.overlay}>
-          <KeyboardAvoidingView behavior={Platform.OS === "ios" ? "padding" : "height"} style={s.keyboardAvoid}>
+          <KeyboardAvoidingView behavior="padding" style={s.keyboardAvoid}>
             <View style={s.modal}>
               <ScrollView
                 keyboardShouldPersistTaps="handled"

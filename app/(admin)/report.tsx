@@ -1,5 +1,11 @@
 import { Card } from "@/components/ui/Card";
 import { GradientHeader } from "@/components/ui/GradientHeader";
+import MonthFilter, {
+  MonthPeriod,
+  monthPeriodLabel,
+  monthPeriodParams,
+  monthPeriodSlug,
+} from "@/components/ui/MonthFilter";
 import {
   AdminReportLog,
   AdminReportResponse,
@@ -24,7 +30,6 @@ import {
   TextInput,
   View,
 } from "react-native";
-import * as XLSX from "xlsx";
 
 const PAGE_LIMIT = 20;
 
@@ -66,6 +71,15 @@ export default function AdminReport() {
   const [startDate, setStartDate] = useState("");
   const [endDate, setEndDate] = useState("");
   const [teamId, setTeamId] = useState<string | null>(null);
+  // A picked month replaces the custom range (and vice versa); null = all time.
+  const [period, setPeriod] = useState<MonthPeriod>(null);
+
+  const pickPeriod = (next: MonthPeriod) => {
+    setPeriod(next);
+    if (next) { setStartDate(""); setEndDate(""); }
+  };
+  const editStart = (v: string) => { setStartDate(v); setPeriod(null); };
+  const editEnd = (v: string) => { setEndDate(v); setPeriod(null); };
 
   const [logs, setLogs] = useState<AdminReportLog[]>([]);
   const [summary, setSummary] = useState<AdminReportResponse["summary"] | null>(null);
@@ -90,6 +104,7 @@ export default function AdminReport() {
           startDate: startDate || undefined,
           endDate: endDate || undefined,
           teamId: teamId || undefined,
+          ...monthPeriodParams(period),
           page: targetPage,
           limit: PAGE_LIMIT,
         });
@@ -104,7 +119,7 @@ export default function AdminReport() {
         setLoadingMore(false);
       }
     },
-    [endDate, startDate, teamId, token],
+    [endDate, startDate, teamId, period, token],
   );
 
   // Re-fetch when filters change
@@ -125,10 +140,11 @@ export default function AdminReport() {
         startDate: startDate || undefined,
         endDate: endDate || undefined,
         teamId: teamId || undefined,
+        ...monthPeriodParams(period),
       });
 
       if (res.logs.length === 0) {
-        Alert.alert("No data", "No report rows match these filters.");
+        Alert.alert("No data", `No report rows match these filters (${monthPeriodLabel(period)}).`);
         return;
       }
 
@@ -144,6 +160,8 @@ export default function AdminReport() {
         Remarks: item.remarks ?? "",
       }));
 
+      // Loaded on demand — it is large and only the export needs it.
+      const XLSX = await import("xlsx");
       const sheet = XLSX.utils.json_to_sheet(rows);
       sheet["!cols"] = [
         { wch: 14 },
@@ -165,7 +183,8 @@ export default function AdminReport() {
       }
 
       const base64 = XLSX.write(workbook, { type: "base64", bookType: "xlsx" });
-      const stamp = new Date().toISOString().slice(0, 10);
+      // A custom range keeps the date stamp; otherwise name it by period.
+      const stamp = startDate || endDate ? new Date().toISOString().slice(0, 10) : monthPeriodSlug(period);
       const fileUri = `${FileSystem.documentDirectory}eashwa-report-${stamp}.xlsx`;
       await FileSystem.writeAsStringAsync(fileUri, base64, {
         encoding: FileSystem.EncodingType.Base64,
@@ -233,6 +252,11 @@ export default function AdminReport() {
 
       {/* Filter bar */}
       <View style={s.filterBar}>
+        <View style={s.periodRow}>
+          <Text style={s.fieldLabel}>Period</Text>
+          <MonthFilter value={period} onChange={pickPeriod} />
+          {startDate || endDate ? <Text style={s.periodHint}>Custom range below</Text> : null}
+        </View>
         <View style={s.dateRow}>
           <View style={s.dateField}>
             <Text style={s.fieldLabel}>Start</Text>
@@ -241,7 +265,7 @@ export default function AdminReport() {
               <TextInput
                 style={s.dateInput}
                 value={startDate}
-                onChangeText={setStartDate}
+                onChangeText={editStart}
                 placeholder="YYYY-MM-DD"
                 placeholderTextColor={colors.textFaint}
                 autoCapitalize="none"
@@ -255,7 +279,7 @@ export default function AdminReport() {
               <TextInput
                 style={s.dateInput}
                 value={endDate}
-                onChangeText={setEndDate}
+                onChangeText={editEnd}
                 placeholder="YYYY-MM-DD"
                 placeholderTextColor={colors.textFaint}
                 autoCapitalize="none"
@@ -400,6 +424,8 @@ const s = StyleSheet.create({
     borderBottomWidth: 1,
     borderBottomColor: colors.borderSoft,
   },
+  periodRow: { flexDirection: "row", alignItems: "center", gap: 10, marginBottom: 12 },
+  periodHint: { fontFamily: fonts.medium, fontSize: 11.5, color: colors.textFaint },
   dateRow: { flexDirection: "row", gap: 10, marginBottom: 12 },
   dateField: { flex: 1 },
   fieldLabel: {

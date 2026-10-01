@@ -7,7 +7,6 @@ import { useEffect, useState } from "react";
 import {
   ActivityIndicator,
   Alert,
-  KeyboardAvoidingView,
   Modal,
   Platform,
   Pressable,
@@ -19,6 +18,7 @@ import {
   View,
 } from "react-native";
 import { SafeAreaView, useSafeAreaInsets } from "react-native-safe-area-context";
+import { KeyboardAvoidingView } from "react-native-keyboard-controller";
 
 const roleColors: Record<string, { bg: string; border: string; text: string }> = {
   team: { bg: "#F0FDF4", border: "#DCFCE7", text: "#059669" },
@@ -254,11 +254,12 @@ export default function AdminTeams() {
         transparent
         animationType="slide"
         statusBarTranslucent
+        navigationBarTranslucent
         onRequestClose={closeModal}
       >
         <View style={s.overlay}>
           <KeyboardAvoidingView
-            behavior={Platform.OS === "ios" ? "padding" : "height"}
+            behavior="padding"
             keyboardVerticalOffset={Platform.OS === "ios" ? 0 : 24}
             style={s.keyboardAvoid}
           >

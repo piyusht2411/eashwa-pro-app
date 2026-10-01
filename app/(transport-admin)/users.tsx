@@ -4,7 +4,6 @@ import {
   Alert,
   FlatList,
   RefreshControl,
-  ScrollView,
   StyleSheet,
   Switch,
   Text,
@@ -13,6 +12,7 @@ import {
   View,
 } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
+import { KeyboardAwareScrollView } from "react-native-keyboard-controller";
 import { router } from "expo-router";
 import { ArrowLeft, Plus, Truck, UserPlus, Users, X } from "lucide-react-native";
 
@@ -182,7 +182,11 @@ export default function AdminUsersScreen() {
       </View>
 
       {showCreate ? (
-        <ScrollView contentContainerStyle={s.formScroll} keyboardShouldPersistTaps="handled">
+        <KeyboardAwareScrollView
+          contentContainerStyle={s.formScroll}
+          bottomOffset={24}
+          keyboardShouldPersistTaps="handled"
+        >
           <View style={s.createCard}>
             <View style={s.createHead}>
               <View style={s.createIcon}>
@@ -284,7 +288,7 @@ export default function AdminUsersScreen() {
                 : <Text style={s.createBtnText}>Create User</Text>}
             </TouchableOpacity>
           </View>
-        </ScrollView>
+        </KeyboardAwareScrollView>
       ) : loading ? (
         <ActivityIndicator style={{ marginTop: 60 }} size="large" color={colors.primary} />
       ) : (

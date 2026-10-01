@@ -1,4 +1,12 @@
 // ─── API Configuration ─────────────────────────────────────────────────────
+// The legacy file-system entry point is the one that still accepts request
+// headers on a download, which the authenticated report export needs.
+import {
+  deleteAsync,
+  downloadAsync,
+  readAsStringAsync,
+} from "expo-file-system/legacy";
+
 import type {
   AccountsDashboard,
   AdminDashboard,
@@ -6,6 +14,7 @@ import type {
   DriverDashboard,
   DriverSummary,
   Expense,
+  ExpenseType,
   Visit,
 } from "@/types";
 
@@ -41,6 +50,13 @@ const withPagination = (path: string, params: PaginationParams = {}) => {
 
 // ─── API Helper ────────────────────────────────────────────────────────────
 
+/**
+ * How long a request may take before it is abandoned. Generous enough for a
+ * server cold start on slow mobile data; without any limit a stalled request
+ * left screens spinning forever, which users read as the app hanging.
+ */
+const REQUEST_TIMEOUT_MS = 30_000;
+
 export async function apiFetch<T>(
   path: string,
   options: RequestInit = {},
@@ -55,35 +71,65 @@ export async function apiFetch<T>(
     headers["Authorization"] = `Bearer ${authToken}`;
   }
 
-  const res = await fetch(`${API_BASE}${path}`, {
-    ...options,
-    headers,
-    credentials: "include", // Include cookies for refresh token
-  });
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), REQUEST_TIMEOUT_MS);
 
-  if (!res.ok) {
-    const errorBody = await res.json().catch(() => ({}));
-    throw new Error(
-      errorBody.message || `Request failed with status ${res.status}`,
-    );
+  try {
+    const res = await fetch(`${API_BASE}${path}`, {
+      ...options,
+      headers,
+      credentials: "include", // Include cookies for refresh token
+      signal: options.signal ?? controller.signal,
+    });
+
+    if (!res.ok) {
+      const errorBody = await res.json().catch(() => ({}));
+      throw new Error(
+        errorBody.message || `Request failed with status ${res.status}`,
+      );
+    }
+
+    return (await res.json()) as T;
+  } catch (err: any) {
+    if (err?.name === "AbortError") {
+      throw new Error("The server is taking too long to respond. Check your internet connection and try again.");
+    }
+    if (err instanceof TypeError) {
+      // fetch rejects with a TypeError when there is no connection at all.
+      throw new Error("No internet connection. Please check your network and try again.");
+    }
+    throw err;
+  } finally {
+    clearTimeout(timer);
   }
-
-  return res.json() as Promise<T>;
 }
 
 // ─── Auth API ───────────────────────────────────────────────────────────────
 
+export interface AuthUser {
+  _id: string;
+  name: string;
+  email: string;
+  role: "admin" | "team" | "pdi" | "accounts" | "driver";
+  /** Portal this session is working in. */
+  portal: "production" | "transport";
+  /** Portal the account belongs to; unchanged by switching. */
+  homePortal?: "production" | "transport";
+  crossPortalAccess?: boolean;
+  availablePortals?: ("production" | "transport")[];
+  phone?: string;
+}
+
 export interface LoginResponse {
   message: string;
   token: string;
-  user: {
-    _id: string;
-    name: string;
-    email: string;
-    role: "admin" | "team" | "pdi" | "accounts" | "driver";
-    portal: "production" | "transport";
-    phone?: string;
-  };
+  user: AuthUser;
+}
+
+export interface SwitchPortalResponse {
+  message: string;
+  token: string;
+  user: AuthUser;
 }
 
 export interface RegisterResponse {
@@ -116,6 +162,8 @@ export interface UpdateUserPayload {
   role?: "team" | "pdi" | "accounts" | "driver";
   password?: string;
   isActive?: boolean;
+  /** Admin accounts only — lets that admin switch between both portals. */
+  crossPortalAccess?: boolean;
 }
 
 export async function loginUser(
@@ -143,6 +191,24 @@ export async function registerUser(
     {
       method: "POST",
       body: JSON.stringify(data),
+    },
+    authToken,
+  );
+}
+
+/**
+ * Move the session into the other portal. Admin accounts flagged with
+ * cross-portal access only — everyone else gets a 403.
+ */
+export async function switchPortal(
+  portal: "production" | "transport",
+  authToken: string,
+): Promise<SwitchPortalResponse> {
+  return apiFetch<SwitchPortalResponse>(
+    "/user/switch-portal",
+    {
+      method: "POST",
+      body: JSON.stringify({ portal }),
     },
     authToken,
   );
@@ -848,6 +914,9 @@ export async function getAdminReport(
   params: {
     startDate?: string;
     endDate?: string;
+    /** 1–12; with `year`, picks one month and overrides the date range. */
+    month?: number;
+    year?: number;
     teamId?: string;
     page?: number;
     limit?: number;
@@ -857,6 +926,10 @@ export async function getAdminReport(
   if (params.startDate) query.set("startDate", params.startDate);
   if (params.endDate) query.set("endDate", params.endDate);
   if (params.teamId) query.set("teamId", params.teamId);
+  if (params.month && params.year) {
+    query.set("month", String(params.month));
+    query.set("year", String(params.year));
+  }
   if (params.page) query.set("page", String(params.page));
   if (params.limit) query.set("limit", String(params.limit));
   const qs = query.toString();
@@ -874,6 +947,9 @@ export async function getAdminReportExport(
   params: {
     startDate?: string;
     endDate?: string;
+    /** 1–12; with `year`, picks one month and overrides the date range. */
+    month?: number;
+    year?: number;
     teamId?: string;
   },
 ): Promise<AdminReportExportResponse> {
@@ -881,6 +957,10 @@ export async function getAdminReportExport(
   if (params.startDate) query.set("startDate", params.startDate);
   if (params.endDate) query.set("endDate", params.endDate);
   if (params.teamId) query.set("teamId", params.teamId);
+  if (params.month && params.year) {
+    query.set("month", String(params.month));
+    query.set("year", String(params.year));
+  }
   const qs = query.toString();
   return apiFetch<AdminReportExportResponse>(
     `/admin/report/export${qs ? `?${qs}` : ""}`,
@@ -1062,8 +1142,14 @@ export const deleteDriver = (id: string, token: string) =>
 export interface CreateVisitPayload {
   driverId: string;
   destination: string;
+  /** "YYYY-MM-DD" */
   startDate: string;
+  /** "YYYY-MM-DD" */
   endDate: string;
+  /** Optional "HH:mm" (24h, IST); omit or "" for a date-only start. */
+  startTime?: string;
+  /** Optional "HH:mm" (24h, IST); omit or "" for a date-only end. */
+  endTime?: string;
   quantity?: number;
   billNumber?: string;
   distance?: number;
@@ -1116,13 +1202,18 @@ export const deleteVisit = (id: string, token: string) =>
   apiFetch<{ message: string }>(`/visits/${id}`, { method: "DELETE" }, token);
 
 export interface ExpenseItemPayload {
-  amount: number;
-  paidBy: "driver" | "company";
+  /** Paid out of the driver's pocket — needs approval before it is reimbursed. */
+  driverAmount: number;
+  /** Paid directly by the company — counted straight away. */
+  companyAmount: number;
   description?: string;
 }
 export interface UpsertExpensePayload {
   food?: ExpenseItemPayload;
   cng?: ExpenseItemPayload;
+  diesel?: ExpenseItemPayload;
+  fastTag?: ExpenseItemPayload;
+  border?: ExpenseItemPayload;
   other?: ExpenseItemPayload & { description: string };
 }
 
@@ -1149,7 +1240,7 @@ export const getPendingExpenses = (token: string) =>
 
 export const approveExpenseItem = (
   expenseId: string,
-  type: "food" | "cng" | "other",
+  type: ExpenseType,
   token: string,
 ) =>
   apiFetch<{ message: string; expense: Expense }>(
@@ -1160,7 +1251,7 @@ export const approveExpenseItem = (
 
 export const rejectExpenseItem = (
   expenseId: string,
-  type: "food" | "cng" | "other",
+  type: ExpenseType,
   remark: string,
   token: string,
 ) =>
@@ -1221,9 +1312,18 @@ export const getMyDriverDashboard = (
     token,
   );
 
+/** Visit report filters. `month` (1–12) + `year` pick one month; none = all time. */
+export type ReportPeriodParams = {
+  driverId?: string;
+  startDate?: string;
+  endDate?: string;
+  month?: number;
+  year?: number;
+};
+
 export const getVisitReport = (
   token: string,
-  params: { driverId?: string; startDate?: string; endDate?: string } = {},
+  params: ReportPeriodParams = {},
 ) =>
   apiFetch<{
     report: (Visit & { expense: Expense | null })[];
@@ -1239,3 +1339,40 @@ export const getVisitReport = (
       rejectedAmount: number;
     };
   }>(`/reports/visits${transportQuery(params)}`, {}, token);
+
+/** Content type of the .xlsx the report endpoint returns. */
+export const XLSX_MIME =
+  "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet";
+
+/**
+ * Download the Excel visit report to a local file and return its uri.
+ *
+ * The endpoint sits behind the same auth as everything else, so the file has
+ * to be fetched with the session token attached — opening the url in a browser
+ * only ever produced a 401.
+ */
+export const downloadVisitReport = async (
+  token: string,
+  destination: string,
+  params: ReportPeriodParams = {},
+): Promise<string> => {
+  const { uri, status } = await downloadAsync(
+    `${API_BASE}/reports/export${transportQuery(params)}`,
+    destination,
+    { headers: { Authorization: `Bearer ${token}` } },
+  );
+
+  if (status === 200) return uri;
+
+  // On a failure the body is JSON, not a spreadsheet — read it back for the
+  // real message rather than handing the user a corrupt file.
+  let message = `Export failed (${status})`;
+  try {
+    const body = await readAsStringAsync(uri);
+    message = JSON.parse(body)?.message || message;
+  } catch {
+    // Body was not readable JSON; the status-code message stands.
+  }
+  await deleteAsync(uri, { idempotent: true });
+  throw new Error(message);
+};

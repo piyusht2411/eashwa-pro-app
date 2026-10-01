@@ -1,7 +1,7 @@
-import React, { useCallback, useEffect, useState } from 'react';
+import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { ActivityIndicator, FlatList, RefreshControl, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
-import { router } from 'expo-router';
+import { router, useFocusEffect } from 'expo-router';
 import { Plus, Route, SearchX } from 'lucide-react-native';
 
 import { getAllVisits } from '@/lib/api';
@@ -38,6 +38,15 @@ export default function AccountsVisitsScreen() {
   }, [token, search, page]);
 
   useEffect(() => { setLoading(true); load(true); }, [search]);
+
+  // Refresh quietly on return, so edited or deleted visits show up as they are now.
+  const focusedOnce = useRef(false);
+  const loadRef = useRef(load);
+  loadRef.current = load;
+  useFocusEffect(useCallback(() => {
+    if (focusedOnce.current) loadRef.current(true);
+    focusedOnce.current = true;
+  }, []));
 
   return (
     <SafeAreaView style={s.root} edges={['top']}>

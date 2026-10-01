@@ -15,9 +15,7 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import {
   ActivityIndicator,
   Alert,
-  KeyboardAvoidingView,
   Modal,
-  Platform,
   Pressable,
   RefreshControl,
   ScrollView,
@@ -27,6 +25,7 @@ import {
   View,
 } from "react-native";
 import { SafeAreaView, useSafeAreaInsets } from "react-native-safe-area-context";
+import { KeyboardAvoidingView } from "react-native-keyboard-controller";
 
 const getPaymentContainerId = (payment: Payment) =>
   typeof payment.container === "string" ? payment.container : payment.container._id;
@@ -543,10 +542,10 @@ export default function AdminPayments() {
         <View style={{ height: 20 }} />
       </ScrollView>
 
-      <Modal visible={!!selectedPaymentId} transparent animationType="slide">
+      <Modal visible={!!selectedPaymentId} transparent animationType="slide" statusBarTranslucent navigationBarTranslucent>
         <View style={s.overlay}>
           <KeyboardAvoidingView
-            behavior={Platform.OS === "ios" ? "padding" : "height"}
+            behavior="padding"
             style={s.keyboardAvoid}
           >
             <View style={s.modal}>
@@ -620,10 +619,10 @@ export default function AdminPayments() {
         </View>
       </Modal>
 
-      <Modal visible={miscModalVisible} transparent animationType="slide">
+      <Modal visible={miscModalVisible} transparent animationType="slide" statusBarTranslucent navigationBarTranslucent>
         <View style={s.overlay}>
           <KeyboardAvoidingView
-            behavior={Platform.OS === "ios" ? "padding" : "height"}
+            behavior="padding"
             style={s.keyboardAvoid}
           >
             <View style={s.modal}>
@@ -720,7 +719,7 @@ export default function AdminPayments() {
         </View>
       </Modal>
 
-      <Modal visible={breakdownVisible} transparent animationType="fade">
+      <Modal visible={breakdownVisible} transparent animationType="fade" statusBarTranslucent navigationBarTranslucent>
         <Pressable style={s.centerOverlay} onPress={() => setBreakdownVisible(false)}>
           <Pressable style={s.breakdownCard} onPress={() => {}}>
             <View style={s.modalHeader}>
@@ -769,10 +768,10 @@ export default function AdminPayments() {
       </Modal>
 
       {/* Edit payment transaction modal */}
-      <Modal visible={!!payEntryEdit} transparent animationType="slide" onRequestClose={() => setPayEntryEdit(null)}>
+      <Modal visible={!!payEntryEdit} transparent animationType="slide" onRequestClose={() => setPayEntryEdit(null)} statusBarTranslucent navigationBarTranslucent>
         <View style={s.overlay}>
           <KeyboardAvoidingView
-            behavior={Platform.OS === "ios" ? "padding" : "height"}
+            behavior="padding"
             style={s.keyboardAvoid}
           >
             <View style={s.modal}>

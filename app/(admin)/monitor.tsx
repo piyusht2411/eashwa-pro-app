@@ -64,13 +64,15 @@ export default function AdminMonitor() {
   const [refreshing, setRefreshing] = useState(false);
   const mountedRef = useRef(true);
 
-  const load = useCallback(async () => {
+  const load = useCallback(async (silent = false) => {
     if (!token) return;
     try {
       const res = await getAdminMonitor(token);
       if (mountedRef.current) setData(res);
     } catch (e: any) {
-      if (mountedRef.current) {
+      // Background polls fail quietly — on a flaky connection an alert every
+      // 30 s stacks up and makes the whole app feel stuck.
+      if (mountedRef.current && !silent) {
         Alert.alert("Error", e.message || "Failed to load monitor");
       }
     } finally {
@@ -82,7 +84,7 @@ export default function AdminMonitor() {
     mountedRef.current = true;
     load();
     const id = setInterval(() => {
-      load();
+      load(true);
     }, 30_000);
     return () => {
       mountedRef.current = false;

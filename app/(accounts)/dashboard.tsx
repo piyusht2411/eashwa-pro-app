@@ -1,7 +1,7 @@
-import React, { useCallback, useEffect, useState } from 'react';
+import React, { useCallback, useState } from 'react';
 import { ActivityIndicator, RefreshControl, ScrollView, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
-import { router } from 'expo-router';
+import { router, useFocusEffect } from 'expo-router';
 import {
   AlertCircle,
   ChevronRight,
@@ -40,7 +40,9 @@ export default function AccountsDashboardScreen() {
     finally { setLoading(false); setRefreshing(false); }
   }, [token]);
 
-  useEffect(() => { load(); }, [load]);
+  // Reload every time the tab comes into view, so a visit created (or edited)
+  // elsewhere shows up without a manual pull-to-refresh.
+  useFocusEffect(useCallback(() => { load(); }, [load]));
 
   if (loading) {
     return (

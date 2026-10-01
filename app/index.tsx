@@ -1,26 +1,21 @@
-import { useAuthStore } from '@/stores/authStore';
 import { Redirect } from 'expo-router';
+import { View } from 'react-native';
+
+import { colors } from '@/lib/theme';
+import { LOGIN_ROUTE, homeRouteFor } from '@/lib/routes';
+import { useAuthStore } from '@/stores/authStore';
 
 export default function Index() {
-  const { isSignedIn, user } = useAuthStore();
+  const { isSignedIn, user, hasHydrated } = useAuthStore();
 
-  if (!isSignedIn || !user) return <Redirect href="/(auth)/login" />;
-
-  // Transport Portal routing
-  if (user.portal === 'transport') {
-    if (user.role === 'admin') return <Redirect href="/(transport-admin)/dashboard" />;
-    if (user.role === 'accounts') return <Redirect href="/(accounts)/dashboard" />;
-    if (user.role === 'driver') return <Redirect href="/(driver)/dashboard" />;
+  // The saved session arrives a tick after the first render. Redirecting before
+  // it lands would throw a signed-in user out to the login screen on every
+  // launch, and fire a second navigation the moment it did land.
+  if (!hasHydrated) {
+    return <View style={{ flex: 1, backgroundColor: colors.bg }} />;
   }
 
-  // Production Portal routing (default fallback)
-  if (user.role === 'admin') return <Redirect href="/(admin)/dashboard" />;
-  if (user.role === 'team') return <Redirect href="/(team)/dashboard" />;
-  if (user.role === 'pdi') return <Redirect href="/(pdi)/dashboard" />;
+  if (!isSignedIn || !user) return <Redirect href={LOGIN_ROUTE} />;
 
-  // Fallback for transport roles if portal was not explicitly set on user object
-  if (user.role === 'accounts') return <Redirect href="/(accounts)/dashboard" />;
-  if (user.role === 'driver') return <Redirect href="/(driver)/dashboard" />;
-
-  return <Redirect href="/(auth)/login" />;
+  return <Redirect href={homeRouteFor(user)} />;
 }

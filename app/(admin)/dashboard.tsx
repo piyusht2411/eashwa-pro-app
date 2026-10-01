@@ -1,5 +1,6 @@
 import { useAuthStore } from "@/stores/authStore";
 import { Card } from "@/components/ui/Card";
+import { PortalSwitchPill } from "@/components/PortalSwitch";
 import { AdminDashboardSummary, getAdminDashboardSummary } from "@/lib/api";
 import { isNearScrollBottom } from "@/lib/scrollPagination";
 import { colors, fonts, radius, shadow } from "@/lib/theme";
@@ -183,9 +184,13 @@ export default function AdminDashboard() {
                 <Text style={s.roleBadgeText}>ADMIN · FULL ACCESS</Text>
               </View>
             </View>
-            <Pressable onPress={goToNotifications} style={s.logoutBtn} hitSlop={8}>
-              <Bell color={colors.white} size={20} />
-            </Pressable>
+            <View style={s.headerActions}>
+              {/* Only renders for an admin who runs both portals. */}
+              <PortalSwitchPill />
+              <Pressable onPress={goToNotifications} style={s.logoutBtn} hitSlop={8}>
+                <Bell color={colors.white} size={20} />
+              </Pressable>
+            </View>
           </View>
 
           <View style={s.contentWrap}>
@@ -353,6 +358,7 @@ const s = StyleSheet.create({
     color: colors.white,
     letterSpacing: 1.4,
   },
+  headerActions: { flexDirection: 'row', alignItems: 'center', gap: 8, flexShrink: 0 },
   logoutBtn: {
     padding: 10,
     backgroundColor: "rgba(255,255,255,0.18)",
